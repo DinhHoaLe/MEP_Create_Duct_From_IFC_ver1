@@ -6,3 +6,5 @@ obj/
 **/obj/
 *.user
 *.suo
+Revit/
+work/
