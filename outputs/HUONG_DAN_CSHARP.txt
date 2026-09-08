@@ -1,0 +1,22 @@
+IFC INFO — C# REVIT 2024 ADD-IN
+
+1. Mở IFCInfo.csproj bằng Visual Studio có .NET SDK và
+   .NET Framework 4.8 Developer Pack.
+2. Project đã cấu hình Revit 2024, .NET Framework 4.8, x64.
+   Nếu Revit cài ở chỗ khác, sửa RevitApiDir trong project.
+3. Dùng IFCInfo.dll đã build kèm theo hoặc Build Release để tạo lại DLL.
+4. Copy DLL vào C:\RevitAddins\IFCInfo\ hoặc sửa Assembly trong
+   IFCInfo.addin thành đường dẫn đầy đủ đến DLL bạn vừa build.
+5. Copy IFCInfo.addin vào %APPDATA%\Autodesk\Revit\Addins\2024\
+   rồi khởi động lại Revit 2024.
+6. Mở project → Add-Ins → External Tools → IFC Info.
+7. Click chọn link; Esc để hủy. Mở rộng hộp thoại để xem nguồn thông tin.
+
+Chỉ đọc dữ liệu, không sửa model. Ưu tiên metadata Original IFC File Name
+trong Project Information của linked document. Nếu thiếu, suy luận từ
+đuôi .ifc.RVT và ghi rõ. Không xác minh file nguồn còn tồn tại.
+Chỉ hỗ trợ RevitLinkInstance trực tiếp trong model hiện hành.
+Không hỗ trợ IFC đã bind, import thành phần tử hoặc nested link.
+
+Đã build Release với API Revit 2024: 0 lỗi, 0 cảnh báo.
+Chưa chạy kiểm thử thao tác chọn link trực tiếp trong Revit.

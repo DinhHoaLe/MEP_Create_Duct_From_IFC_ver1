@@ -1,0 +1,16 @@
+TẠO DUCT TỪ IFC — REVIT 2024
+
+1. Nạp lại IFCInfo.dll mới; nếu Revit đang giữ DLL cũ, khởi động lại Revit.
+2. Mở tool → chọn IFC link trong dropdown → chọn Category Ducts → Tiếp tục.
+3. Chọn các dòng (hoặc Chọn tất cả) → Tạo Duct.
+4. Kiểm tra số đoạn sẵn sàng/bỏ qua. Chọn Duct Type tròn/chữ nhật và ánh xạ từng System Type nguồn sang System Type trong model chính.
+5. Bấm Tạo Duct. Tool giữ đường tim, cao độ, kích thước và góc tiết diện; chọn Level theo cao độ. IFC link được giữ nguyên.
+
+Nguồn DirectShape: hỗ trợ IFC2X3 có một IfcExtrudedAreaSolid tròn/chữ nhật; phải khớp GUID, kích thước và hình học solid trong link. Duct native thẳng có thể đọc trực tiếp từ Revit. Các nguồn flex/cong/oval, hình học phức tạp hoặc đường tim không xác định duy nhất được bỏ qua và liệt kê trước khi tạo.
+
+System Type Revit dùng theo ánh xạ người dùng chọn. System Name nguồn lưu trong Comments và dữ liệu theo dõi; chưa tạo fitting, nối connector hoặc dựng hệ thống MEP hoàn chỉnh.
+
+Chống tạo lại từ cùng link instance + GUID. Có thể Undo toàn bộ lượt tạo. Nếu Revit báo lỗi tạo hoặc kiểm tra đường tim/góc không đạt, hoàn tác cả lượt.
+
+Đã build 0 lỗi, 0 cảnh báo; kiểm tra UI lựa chọn type và reader trên Snowdon: 1084 ducts, 1053 đọc được kích thước, 31 chưa hỗ trợ. Chưa xác minh thao tác tạo Duct trong phiên Revit thực tế; số tạo được còn phụ thuộc đối chiếu hình học link và type trong model chính.
+

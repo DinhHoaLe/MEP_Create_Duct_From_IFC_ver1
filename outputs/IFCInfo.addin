@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Command">
+    <Name>IFC Info</Name>
+    <Assembly>C:\RevitAddins\IFCInfo\IFCInfo.dll</Assembly>
+    <AddInId>8875233F-C015-4400-9B76-8602141587CA</AddInId>
+    <FullClassName>IFCInfo.IFCInfoCommand</FullClassName>
+    <Text>IFC Info</Text>
+    <VendorId>IFCI</VendorId>
+    <VendorDescription>IFC link information utility</VendorDescription>
+  </AddIn>
+</RevitAddIns>

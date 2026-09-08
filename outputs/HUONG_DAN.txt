@@ -1,0 +1,27 @@
+IFC INFO — TOOL CHẠY THỦ CÔNG TRONG PYREVIT
+
+Yêu cầu: Revit có pyRevit và engine IronPython mặc định.
+
+Cài đặt:
+1. Giải nén IFCInfo.zip.
+2. Copy thư mục IFCInfo.extension vào %APPDATA%\pyRevit\Extensions.
+3. Reload pyRevit hoặc khởi động lại Revit.
+4. Mở project, vào tab IFC Tools → Links → IFC Info.
+5. Click chọn một IFC link trong view. Esc để hủy.
+
+Kết quả: hộp thoại và cửa sổ output hiển thị tên IFC, giá trị đường dẫn
+IFC, đường dẫn Revit link, instance ID và nguồn lấy thông tin.
+
+Tool ưu tiên Original IFC File Name trong Project Information của model
+link. Nếu thiếu, tool suy luận từ đường dẫn có đuôi .ifc.RVT và ghi rõ
+đây là suy luận. Không tự đoán IFC từ tên một file RVT thông thường.
+Metadata có thể cũ; tool không xác minh sự tồn tại của IFC nguồn.
+Phạm vi: RevitLinkInstance chọn trực tiếp trong model hiện hành.
+Không xử lý IFC đã bind/import thành phần tử hoặc nested link.
+Tool chỉ đọc, không ghi parameter và không thay đổi model.
+
+Chưa kiểm thử trực tiếp trong Revit; cần chạy thử trên phiên bản của bạn.
+
+Nguồn tham khảo:
+https://github.com/Autodesk/revit-ifc/blob/master/Source/Revit.IFC.Import/Data/IFCImportFile.cs
+https://help.autodesk.com/cloudhelp/2024/ENU/Revit-Model/files/GUID-DE8B322A-A507-4E03-93EC-AA21F354E43B.htm

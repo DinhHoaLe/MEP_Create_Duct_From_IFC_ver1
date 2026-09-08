@@ -1,0 +1,9 @@
+C:\Users\9B343_u01\Documents\Codex\2026-09-08\g\work\ifc2024-build\IFCInfo.dll
+C:\Users\9B343_u01\Documents\Codex\2026-09-08\g\work\ifc2024-build\IFCInfo.pdb
+C:\Users\9B343_u01\Documents\Codex\2026-09-08\g\work\ifc2024-obj\Release\net48\IFCInfo.csproj.AssemblyReference.cache
+C:\Users\9B343_u01\Documents\Codex\2026-09-08\g\work\ifc2024-obj\Release\net48\IFCInfo.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\9B343_u01\Documents\Codex\2026-09-08\g\work\ifc2024-obj\Release\net48\IFCInfo.AssemblyInfoInputs.cache
+C:\Users\9B343_u01\Documents\Codex\2026-09-08\g\work\ifc2024-obj\Release\net48\IFCInfo.AssemblyInfo.cs
+C:\Users\9B343_u01\Documents\Codex\2026-09-08\g\work\ifc2024-obj\Release\net48\IFCInfo.csproj.CoreCompileInputs.cache
+C:\Users\9B343_u01\Documents\Codex\2026-09-08\g\work\ifc2024-obj\Release\net48\IFCInfo.dll
+C:\Users\9B343_u01\Documents\Codex\2026-09-08\g\work\ifc2024-obj\Release\net48\IFCInfo.pdb
