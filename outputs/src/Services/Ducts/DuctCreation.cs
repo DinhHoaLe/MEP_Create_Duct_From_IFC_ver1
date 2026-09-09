@@ -107,8 +107,9 @@ namespace IFCInfo
                 catch { if (transaction.GetStatus() == TransactionStatus.Started) transaction.RollBack(); throw; }
             }
             uiDoc.Selection.SetElementIds(created);
-            TaskDialog.Show("Tạo Duct", "Đã tạo " + created.Count + " đoạn ống trong model chính.\n" +
-                "Giữ nguyên IFC link. Có thể Undo lượt tạo.\nChưa tạo fitting hoặc nối mạng. System Name nguồn được lưu trong Comments; Revit quản lý tên hệ thống thực tế.");
+            var result = new DuctCreationResultWindow(created.Count);
+            new System.Windows.Interop.WindowInteropHelper(result).Owner = uiDoc.Application.MainWindowHandle;
+            result.ShowDialog();
         }
         private static void SetSize(Duct duct, BuiltInParameter parameter, double value)
         {
