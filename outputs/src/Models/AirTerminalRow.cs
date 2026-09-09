@@ -22,7 +22,9 @@ namespace IFCInfo
         public event PropertyChangedEventHandler PropertyChanged;
         public IfcTerminalSource DuctSource { get; set; }
         private string ductExistence = "Chưa xác định";
-        public bool CanSelect => ductExistence != "Đã tồn tại";
+        public bool CanSelect => ductExistence != "Đã tồn tại" && ductExistence != "Khớp hoàn toàn"
+            && ductExistence != "Sai kích thước" && ductExistence != "Sai hệ thống"
+            && ductExistence != "Sai kích thước và hệ thống" && ductExistence != "Chưa xác định hệ thống";
         public string DuctExistence
         {
             get => ductExistence;
