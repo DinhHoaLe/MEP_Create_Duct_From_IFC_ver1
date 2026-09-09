@@ -22,6 +22,8 @@ namespace IFCInfo
                 return Result.Cancelled;
             }
 
+            // Check if the IFC link catalog is available
+
             try
             {
                 Document doc = uiDoc.Document;
