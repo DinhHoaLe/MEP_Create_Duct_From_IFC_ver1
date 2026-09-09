@@ -74,7 +74,7 @@ flowchart TD
 ## Điểm cần lưu ý khi kiểm tra
 
 - Tạo Duct: dung sai hình học giữ nguyên `0.002 feet` (khoảng 0,6 mm).
-- Cột đã tồn tại: so đường tim trong model chính với sai số `1 mm`, không kiểm tra kích thước hoặc hệ thống.
+- Cột đối chiếu Duct: so đường tim và kích thước với sai số `1 mm`, kiểm tra System Type đích khi xác định được. Xem `DUCT_COMPARISON.md` về trạng thái và giới hạn.
 - `DuctWorkflow.Configure` phải chạy sau `CategoryReader.Configure`: workflow bổ sung bước kiểm tra tồn tại vào callback đọc Category.
 - Thay đổi lần này là tổ chức lại mã, không thay đổi quy tắc tạo ống hoặc giao diện.
 - Project chỉ compile `src/**/*.cs`. Bản mã cũ được chuyển sang thư mục backup trong `work/`, tránh có hai bản dễ nhầm.

@@ -10,10 +10,31 @@ namespace IFCInfo
         public sealed class Segment
         {
             public long Id; public double[] Start, End;
+            public double Width, Height, Diameter;
+            public long SystemTypeId;
+            public bool UnsupportedShape;
         }
         public sealed class Result
         {
             public string Status; public List<long> Ids = new List<long>();
+            public bool FullyCovered;
+        }
+        public static Result CheckDetails(double[] start, double[] end, IEnumerable<Segment> ducts,
+            double tolerance, double width, double height, double diameter, long? expectedSystemTypeId)
+        {
+            var segments = ducts.ToList();
+            var result = Check(start, end, segments, tolerance);
+            if (!result.FullyCovered) return result;
+            var overlapping = segments.Where(d => result.Ids.Contains(d.Id)).ToList();
+            bool wrongSize = overlapping.Any(d => d.UnsupportedShape || (diameter > 0
+                ? d.Diameter <= 0 || Math.Abs(d.Diameter - diameter) > tolerance
+                : d.Diameter > 0 || Math.Abs(d.Width - width) > tolerance || Math.Abs(d.Height - height) > tolerance));
+            bool wrongSystem = expectedSystemTypeId.HasValue && overlapping.Any(d => d.SystemTypeId != expectedSystemTypeId.Value);
+            result.Status = wrongSize && wrongSystem ? "Sai kích thước và hệ thống"
+                : wrongSize ? "Sai kích thước"
+                : wrongSystem ? "Sai hệ thống"
+                : !expectedSystemTypeId.HasValue ? "Chưa xác định hệ thống" : "Khớp hoàn toàn";
+            return result;
         }
         public static Result Check(double[] start, double[] end, IEnumerable<Segment> ducts, double tolerance)
         {
@@ -53,6 +74,7 @@ namespace IFCInfo
                 covered = Math.Max(covered, span[1]);
             }
             result.Status = covered >= length - tolerance ? "Đã tồn tại" : "Trùng một phần";
+            result.FullyCovered = covered >= length - tolerance;
             return result;
         }
         private static double[] Sub(double[] a, double[] b) => new[] { a[0] - b[0], a[1] - b[1], a[2] - b[2] };

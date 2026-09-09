@@ -95,6 +95,7 @@ namespace IFCInfo
                         tracking.Set(schema.GetField("SystemName"), item.Source.SystemName ?? "");
                         tracking.Set(schema.GetField("SystemType"), item.Source.SystemType ?? "");
                         duct.SetEntity(tracking);
+                        DuctExistenceChecker.RecordMapping(duct, item.Key, item.Source.SystemType, systemId.Value);
                         Parameter comments = duct.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
                         if (comments != null && !comments.IsReadOnly)
                             comments.Set("IFC GUID: " + item.Source.IfcGuid + " | System Name: " + item.Source.SystemName +

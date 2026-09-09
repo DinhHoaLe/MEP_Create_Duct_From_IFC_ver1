@@ -365,16 +365,22 @@ namespace IFCInfo
                 statusStyle.Setters.Add(new Setter(TextBlock.FontWeightProperty, FontWeights.SemiBold));
                 statusStyle.Setters.Add(new Setter(TextBlock.ForegroundProperty, Brush("#9A6A16")));
                 statusStyle.Setters.Add(new Setter(TextBlock.ToolTipProperty, new System.Windows.Data.Binding("DuctExistenceDetail")));
-                var exists = new DataTrigger { Binding = new System.Windows.Data.Binding("DuctExistence"), Value = "Đã tồn tại" };
+                var exists = new DataTrigger { Binding = new System.Windows.Data.Binding("DuctExistence"), Value = "Khớp hoàn toàn" };
                 exists.Setters.Add(new Setter(TextBlock.ForegroundProperty, Brush("#16815D")));
                 statusStyle.Triggers.Add(exists);
+                foreach (string mismatch in new[] { "Sai kích thước", "Sai hệ thống", "Sai kích thước và hệ thống" })
+                {
+                    var error = new DataTrigger { Binding = new System.Windows.Data.Binding("DuctExistence"), Value = mismatch };
+                    error.Setters.Add(new Setter(TextBlock.ForegroundProperty, Brush("#B54747")));
+                    statusStyle.Triggers.Add(error);
+                }
                 var missing = new DataTrigger { Binding = new System.Windows.Data.Binding("DuctExistence"), Value = "Chưa tồn tại" };
                 missing.Setters.Add(new Setter(TextBlock.ForegroundProperty, Brush("#637FA5")));
                 statusStyle.Triggers.Add(missing);
                 table.Columns.Add(new DataGridTextColumn
                 {
-                    Header = "Duct đã tồn tại",
-                    Width = 155,
+                    Header = "Đối chiếu Duct",
+                    Width = 215,
                     IsReadOnly = true,
                     Binding = new System.Windows.Data.Binding("DuctExistence"),
                     ElementStyle = statusStyle
