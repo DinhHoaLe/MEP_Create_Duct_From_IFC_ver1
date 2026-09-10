@@ -41,6 +41,7 @@ DATA;
 ENDSEC;
 END-ISO-10303-21;
 '@
+$sample = $sample.Replace("`r`n", "`n")
 $reader = Read-Sample $sample
 $d = $reader.Ducts['duct']
 Assert (!$d.GeometryError -and $d.WidthMm -eq 200 -and $d.HeightMm -eq 100 -and $d.LengthMm -eq 1000) 'IFC4 direct extrusion'

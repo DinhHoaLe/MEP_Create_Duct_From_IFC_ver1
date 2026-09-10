@@ -13,6 +13,11 @@ namespace IFCInfo
     public sealed class IFCInfoWindow : Window
     {
         private readonly TextBlock feedback;
+        public AirTerminalRow NavigationRow { get; private set; }
+        public string NavigationAction { get; private set; }
+        public Func<List<AirTerminalRow>, DuctRequest> PrepareUpdates { get; set; }
+        public Dictionary<string,List<long>> SavedDuctRuns { get; set; } = new Dictionary<string,List<long>>();
+        public List<long> RunSelection { get; private set; }
         public List<LinkOption> Links { get; set; } = new List<LinkOption>();
         public LinkOption SelectedLink
         {
@@ -409,6 +414,39 @@ namespace IFCInfo
             selectNone.Click += (s, e) => { foreach (var row in AirTerminals) row.IsSelected = false; };
             selectionBar.Children.Add(selectAll);
             selectionBar.Children.Add(selectNone);
+            if (CanCreateDucts)
+            {
+                foreach (string action in new[] { "Zoom tới nguồn IFC", "Chọn duct tương ứng", "Cô lập trong 3D" })
+                {
+                    var button = Button(action, false);
+                    button.Click += (s,e) =>
+                    {
+                        var row = table.CurrentCell.Item as AirTerminalRow;
+                        if (row == null) { feedback.Text = "Bấm vào một dòng trong bảng trước."; return; }
+                        NavigationRow = row; NavigationAction = action; Close();
+                    };
+                    selectionBar.Children.Add(button);
+                }
+                var update = Button("Xem trước cập nhật IFC", false);
+                update.Click += (s,e) =>
+                {
+                    try
+                    {
+                        var request = PrepareUpdates?.Invoke(AirTerminals);
+                        if (request != null) { DuctCreationRequest = request; Close(); }
+                    }
+                    catch (Exception ex) { feedback.Text = ex.Message; }
+                };
+                selectionBar.Children.Add(update);
+                if (SavedDuctRuns.Count>0)
+                {
+                    var runs=new ComboBox { ItemsSource=SavedDuctRuns.Keys.OrderByDescending(k=>k).ToList(),Width=280,Margin=new Thickness(4),SelectedIndex=0 };
+                    selectionBar.Children.Add(runs);
+                    var chooseRun=Button("Chọn duct của lượt đã lưu",false);
+                    chooseRun.Click+=(s,e)=> { if (runs.SelectedItem!=null) { RunSelection=SavedDuctRuns[(string)runs.SelectedItem]; Close(); } };
+                    selectionBar.Children.Add(chooseRun);
+                }
+            }
             panel.Children.Add(selectionBar);
             panel.Children.Add(table);
             if (!AirTerminalCount.HasValue)

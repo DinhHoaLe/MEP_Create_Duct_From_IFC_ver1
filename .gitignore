@@ -8,3 +8,5 @@ obj/
 *.suo
 Revit/
 work/
+outputs/qa/
+outputs/backups/

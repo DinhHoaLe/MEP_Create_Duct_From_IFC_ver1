@@ -1,96 +1,44 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
-
+using Microsoft.Win32;
 namespace IFCInfo
 {
     internal sealed class DuctCreationResultWindow : Window
     {
-        internal DuctCreationResultWindow(int createdCount)
+        internal DuctCreationResultWindow(List<DuctRunRow> rows,bool rolledBack,Action select)
         {
-            Title = "Tạo Duct từ IFC · Kết quả";
-            Width = 580;
-            SizeToContent = SizeToContent.Height;
-            MaxHeight = SystemParameters.WorkArea.Height;
-            MaxWidth = SystemParameters.WorkArea.Width;
-            ResizeMode = ResizeMode.NoResize;
-            WindowStartupLocation = WindowStartupLocation.CenterOwner;
-            ShowInTaskbar = false;
-            Background = UiDesign.Background;
-            FontFamily = new FontFamily("Segoe UI");
-            FontSize = 14;
-            UseLayoutRounding = true;
-
-            var root = new DockPanel { Margin = new Thickness(28) };
-            Content = root;
-            var close = IFCInfoWindow.Button("Đóng", true);
-            close.HorizontalAlignment = HorizontalAlignment.Right;
-            close.Margin = new Thickness(0, 20, 0, 0);
-            close.MinWidth = 112;
-            close.IsDefault = true;
-            close.IsCancel = true;
-            close.Click += (s, e) => Close();
-            DockPanel.SetDock(close, Dock.Bottom);
-            root.Children.Add(close);
-
-            var body = new StackPanel();
-            root.Children.Add(new ScrollViewer
+            Title="IFC · Báo cáo lượt tạo / cập nhật"; Width=1050; Height=600; MaxHeight=SystemParameters.WorkArea.Height;
+            WindowStartupLocation=WindowStartupLocation.CenterOwner; Background=UiDesign.Background;
+            FontFamily=new System.Windows.Media.FontFamily("Segoe UI"); FontSize=14;
+            var root=new DockPanel { Margin=new Thickness(20),Background=Background }; Content=root;
+            var summary=IFCInfoWindow.Text(rolledBack ? "Đã hoàn tác toàn bộ lượt" : "Thành công: "+rows.Count(r=>r.Success)+" thao tác · Lỗi/bỏ qua: "+rows.Count(r=>!r.Success),22,"#102A50");
+            DockPanel.SetDock(summary,Dock.Top); root.Children.Add(summary);
+            var buttons=new WrapPanel { Margin=new Thickness(0,12,0,0) }; DockPanel.SetDock(buttons,Dock.Bottom); root.Children.Add(buttons);
+            var feedback=IFCInfoWindow.Text("",13,"#9A5B12"); DockPanel.SetDock(feedback,Dock.Bottom); root.Children.Add(feedback);
+            var export=IFCInfoWindow.Button("Xuất CSV",false); buttons.Children.Add(export);
+            export.Click+=(s,e)=>
             {
-                Content = body,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
-            });
-            var title = IFCInfoWindow.Text(createdCount > 0 ? "Tạo Duct hoàn tất" : "Không có Duct mới được tạo", 26, "#102A50");
-            title.FontWeight = FontWeights.Bold;
-            body.Children.Add(title);
-            var subtitle = IFCInfoWindow.Text("Kết quả tạo ống từ IFC vào model chính", 14, "#637FA5");
-            subtitle.Margin = new Thickness(0, 6, 0, 20);
-            body.Children.Add(subtitle);
-
-            var summary = new StackPanel();
-            var count = IFCInfoWindow.Text(createdCount.ToString("N0") + " đoạn ống đã tạo", 22, "#1367C1");
-            count.FontWeight = FontWeights.SemiBold;
-            summary.Children.Add(count);
-            var status = IFCInfoWindow.Text(createdCount > 0
-                ? "Các đoạn ống mới đang được chọn trong model chính."
-                : "Các nguồn đã được tạo trước đó được bỏ qua.", 14, "#526880");
-            status.Margin = new Thickness(0, 8, 0, 0);
-            summary.Children.Add(status);
-            body.Children.Add(new Border
-            {
-                Background = IFCInfoWindow.Brush("#E7F2FF"),
-                CornerRadius = new CornerRadius(10),
-                Padding = new Thickness(18),
-                Child = summary,
-                Margin = new Thickness(0, 0, 0, 16)
-            });
-
-            var details = new StackPanel();
-            var detailsTitle = IFCInfoWindow.Text("Thông tin sau khi tạo", 16, "#102A50");
-            detailsTitle.FontWeight = FontWeights.SemiBold;
-            details.Children.Add(detailsTitle);
-            AddNote(details, createdCount > 0
-                ? "IFC link được giữ nguyên. Có thể dùng Undo để hoàn tác lượt tạo."
-                : "IFC link được giữ nguyên.");
-            AddNote(details, "Chưa tạo fitting hoặc kết nối mạng ống.");
-            AddNote(details, "System Name nguồn được lưu trong Comments. Revit quản lý tên hệ thống thực tế.");
-            body.Children.Add(new Border
-            {
-                Background = Brushes.White,
-                BorderBrush = IFCInfoWindow.Brush("#DFE9F6"),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(14),
-                Padding = new Thickness(18),
-                Effect = UiDesign.Shadow(),
-                Child = details
-            });
-        }
-
-        private static void AddNote(StackPanel panel, string message)
-        {
-            var note = IFCInfoWindow.Text(message, 14, "#526880");
-            note.Margin = new Thickness(0, 10, 0, 0);
-            panel.Children.Add(note);
+                try
+                {
+                    var file=new SaveFileDialog { Filter="CSV (*.csv)|*.csv",FileName="IFC-run-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+".csv" };
+                    if (file.ShowDialog(this)==true) { DuctRunRow.Export(file.FileName,rows); feedback.Text="Đã xuất báo cáo."; }
+                }
+                catch (Exception ex) { feedback.Text=ex.Message; }
+            };
+            var choose=IFCInfoWindow.Button("Chọn toàn bộ duct của lượt và đóng",false); buttons.Children.Add(choose); choose.IsEnabled=!rolledBack && rows.Any(r=>r.Success);
+            choose.Click+=(s,e)=> { select(); Close(); };
+            var close=IFCInfoWindow.Button("Đóng",true); buttons.Children.Add(close); close.Click+=(s,e)=>Close();
+            var grid=new DataGrid { ItemsSource=rows,AutoGenerateColumns=false,IsReadOnly=true,CanUserAddRows=false,Margin=new Thickness(0,14,0,0),MinRowHeight=34,ColumnHeaderHeight=36 };
+            var textStyle=new Style(typeof(TextBlock));
+            textStyle.Setters.Add(new Setter(TextBlock.TextWrappingProperty,TextWrapping.Wrap));
+            textStyle.Setters.Add(new Setter(TextBlock.MarginProperty,new Thickness(6)));
+            foreach (var column in new[] { new[] {"Nguồn IFC","SourceId"},new[] {"IFC GUID","IfcGuid"},new[] {"Element ID đích","TargetId"},new[] {"Trạng thái","Status"},new[] {"Chi tiết","Reason"} })
+                grid.Columns.Add(new DataGridTextColumn { Header=column[0],Binding=new System.Windows.Data.Binding(column[1]),ElementStyle=textStyle,
+                    Width=column[1]=="Reason" ? new DataGridLength(1,DataGridLengthUnitType.Star) : new DataGridLength(column[1]=="IfcGuid" ? 200 : 130),MinWidth=90 });
+            root.Children.Add(grid);
         }
     }
 }

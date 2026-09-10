@@ -45,6 +45,16 @@ namespace IFCInfo
                 dialog.ShowDialog();
                 if (selectedLink != null)
                 {
+                    if (dialog.RunSelection != null)
+                    {
+                        var ids=dialog.RunSelection.Select(id=>new ElementId(id)).Where(id=>doc.GetElement(id)!=null).ToList();
+                        uiDoc.Selection.SetElementIds(ids); if (ids.Count>0) uiDoc.ShowElements(ids); return Result.Succeeded;
+                    }
+                    if (dialog.NavigationRow != null)
+                    {
+                        DuctNavigation.Execute(uiDoc, selectedLink, dialog.NavigationRow, dialog.NavigationAction);
+                        return Result.Succeeded;
+                    }
                     AirTerminalReplacement.Execute(uiDoc, selectedLink, dialog);
                     DuctCreation.Execute(uiDoc, dialog);
                 }

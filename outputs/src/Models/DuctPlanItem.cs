@@ -10,5 +10,11 @@ namespace IFCInfo
         public double Width, Height, Diameter;
         public string Key;
         public bool Round => Diameter > 0;
+        public long ExistingId;
+        public string LevelKey, ChangeSummary;
+        public bool Include { get; set; } = true;
+        public string PreviewSource => Source?.ElementId;
+        public string PreviewTarget => ExistingId > 0 ? ExistingId.ToString() : "Mới";
+        public string PreviewChange => ChangeSummary ?? "Tạo mới";
     }
 }
