@@ -10,6 +10,11 @@ namespace IFCInfo
         public List<DuctPlanItem> Items;
         public long RoundTypeId, RectangularTypeId;
         public Dictionary<string, long> SystemTypes = new Dictionary<string, long>();
+        public Dictionary<string, long> Levels = new Dictionary<string, long>();
+        public Dictionary<string, long> Worksets = new Dictionary<string, long>();
+        public bool KeepSuccessful, CreateFittings, ConnectTerminals, SaveSettings = true;
+        public double FittingGapMm = 1;
+        public List<DuctRunRow> Skipped = new List<DuctRunRow>();
     }
 }
 

@@ -13,6 +13,7 @@ namespace IFCInfo
             public double Width, Height, Diameter;
             public long SystemTypeId;
             public bool UnsupportedShape;
+            public double[] WidthAxis;
         }
         public sealed class Result
         {
@@ -20,7 +21,7 @@ namespace IFCInfo
             public bool FullyCovered;
         }
         public static Result CheckDetails(double[] start, double[] end, IEnumerable<Segment> ducts,
-            double tolerance, double width, double height, double diameter, long? expectedSystemTypeId)
+            double tolerance, double width, double height, double diameter, long? expectedSystemTypeId, double[] widthAxis = null)
         {
             var segments = ducts.ToList();
             var result = Check(start, end, segments, tolerance);
@@ -30,9 +31,12 @@ namespace IFCInfo
                 ? d.Diameter <= 0 || Math.Abs(d.Diameter - diameter) > tolerance
                 : d.Diameter > 0 || Math.Abs(d.Width - width) > tolerance || Math.Abs(d.Height - height) > tolerance));
             bool wrongSystem = expectedSystemTypeId.HasValue && overlapping.Any(d => d.SystemTypeId != expectedSystemTypeId.Value);
+            bool wrongRotation = diameter <= 0 && widthAxis != null && overlapping.Any(d => d.WidthAxis != null &&
+                Math.Abs(Dot(widthAxis,d.WidthAxis)) < 1-1e-6);
             result.Status = wrongSize && wrongSystem ? "Sai kích thước và hệ thống"
                 : wrongSize ? "Sai kích thước"
                 : wrongSystem ? "Sai hệ thống"
+                : wrongRotation ? "Sai góc tiết diện"
                 : !expectedSystemTypeId.HasValue ? "Chưa xác định hệ thống" : "Khớp hoàn toàn";
             return result;
         }

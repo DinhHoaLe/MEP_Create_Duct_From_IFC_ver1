@@ -40,6 +40,7 @@ namespace IFCInfo
             var mappingSchema = Schema.Lookup(MappingId);
             var systemTypes = new FilteredElementCollector(doc).OfClass(typeof(MechanicalSystemType))
                 .Cast<MechanicalSystemType>().ToList();
+            var settings = DuctProjectSettings.Load(doc);
             bool incomplete = false;
             foreach (Duct duct in new FilteredElementCollector(doc).OfClass(typeof(Duct)))
             {
@@ -67,6 +68,7 @@ namespace IFCInfo
                     Width = Size(duct, BuiltInParameter.RBS_CURVE_WIDTH_PARAM),
                     Height = Size(duct, BuiltInParameter.RBS_CURVE_HEIGHT_PARAM),
                     Diameter = Size(duct, BuiltInParameter.RBS_CURVE_DIAMETER_PARAM),
+                    WidthAxis = Coordinates(duct.ConnectorManager.Connectors.Cast<Connector>().First(c=>c.ConnectorType==ConnectorType.End).CoordinateSystem.BasisX),
                     UnsupportedShape = duct.DuctType.Shape != ConnectorProfileType.Round && duct.DuctType.Shape != ConnectorProfileType.Rectangular,
                     SystemTypeId = duct.get_Parameter(BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM)?.AsElementId().Value ?? -1
                 });
@@ -82,7 +84,9 @@ namespace IFCInfo
                     var geometry = DuctGeometryReader.Read(source, row.DuctSource);
                     string key = link.UniqueId + "|" + (string.IsNullOrWhiteSpace(row.IfcGuid) ? source.UniqueId : row.IfcGuid) + "|" + (row.SystemType ?? "");
                     long? expectedSystem = null;
-                    if (savedMappings.TryGetValue(key, out var mappedIds))
+                    var configured = settings.Systems.FirstOrDefault(m => m.Key == DuctRequest.SystemKey(geometry.Round, row.SystemType));
+                    if (configured != null && systemTypes.Any(t => t.Id.Value == configured.Id)) expectedSystem = configured.Id;
+                    else if (savedMappings.TryGetValue(key, out var mappedIds))
                     {
                         if (mappedIds.Count == 1) expectedSystem = mappedIds.Single();
                     }
@@ -94,9 +98,10 @@ namespace IFCInfo
                     }
                     var result = DuctCoverage.CheckDetails(Coordinates(transform.OfPoint(geometry.Start)),
                         Coordinates(transform.OfPoint(geometry.End)), ducts, 1.0 / 304.8,
-                        geometry.Width, geometry.Height, geometry.Diameter, expectedSystem);
+                        geometry.Width, geometry.Height, geometry.Diameter, expectedSystem,Coordinates(transform.OfVector(geometry.WidthAxis).Normalize()));
+                    row.CorrespondingDuctIds = result.Ids;
                     row.DuctExistence = incomplete && !result.FullyCovered ? "Chưa xác định" : result.Status;
-                    row.DuctExistenceDetail = "Đối chiếu đường tim và kích thước, sai số 1 mm; tiết diện chữ nhật so Width/Height theo tên, chưa kiểm tra góc xoay. System kiểm tra theo System Type, chưa kiểm tra System Name hoặc kết nối." +
+                    row.DuctExistenceDetail = "Đối chiếu đường tim, kích thước (sai số 1 mm) và hướng tiết diện. Hệ thống so theo System Type đích; System Name IFC lưu riêng, không dùng tên hệ thống tự sinh của Revit." +
                         (expectedSystem.HasValue ? " System Type đích ID: " + expectedSystem.Value + "." : " Chưa xác định System Type đích: thiếu ánh xạ đã lưu hoặc tên IFC không khớp duy nhất tên type trong Revit.") +
                         (result.FullyCovered ? " Đường tim đã được phủ đủ; không chọn tạo thêm để tránh chồng ống." : "") +
                         (result.Ids.Count == 0 ? "" : " Duct ID: " + string.Join(", ", result.Ids)) +
@@ -110,6 +115,7 @@ namespace IFCInfo
                 }
                 catch (Exception ex)
                 {
+                    row.CorrespondingDuctIds.Clear();
                     row.DuctExistence = "Chưa xác định";
                     row.DuctExistenceDetail = ex.Message;
                 }
