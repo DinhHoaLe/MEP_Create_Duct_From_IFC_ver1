@@ -31,7 +31,7 @@ namespace IFCInfo
             window.AirTerminalCount = null;
             window.AirTerminalError = null;
             window.AirTerminals = new List<AirTerminalRow>();
-            window.CanReplaceCategory = category.Id == (long)BuiltInCategory.OST_DuctTerminal;
+            window.CanReplaceCategory = true;
             bool isDuct = category.Id == (long)BuiltInCategory.OST_DuctCurves ||
                 category.Id == (long)BuiltInCategory.OST_FlexDuctCurves;
             window.CanCreateDucts = isDuct;
@@ -67,7 +67,7 @@ namespace IFCInfo
                 }
                 else if (readIfc)
                     window.IfcSourceStatus = "Chưa chọn IFC gốc. Chỉ đọc parameter trong Revit; chưa có cao độ IFC.";
-                var sourceElements = ifc == null ? null : (isDuct ? ifc.Ducts : ifc.Terminals);
+                var sourceElements = ifc?.Products;
                 int matched = 0;
                 // Count instances in the selected linked document, not the host/view.
                 using (var collector = new FilteredElementCollector(linkedDoc))
@@ -95,8 +95,8 @@ namespace IFCInfo
                         if (sourceElements != null && sourceElements.TryGetValue(guid, out sourceRow))
                         {
                             matched++;
-                            if (isDuct)
-                                row.DuctSource = sourceRow;
+                            row.DuctSource = sourceRow;
+                            row.IfcProperties = sourceRow.Properties;
                             if (!string.IsNullOrWhiteSpace(sourceRow.SystemName))
                                 row.SystemName = sourceRow.SystemName;
                             if (!string.IsNullOrWhiteSpace(sourceRow.SystemType))
@@ -106,6 +106,17 @@ namespace IFCInfo
                                 : "Không có thông tin";
                             row.DataSource = "Khớp IFC GUID; ưu tiên IFC gốc";
                         }
+                        if (row.IfcProperties.Count==0)
+                        foreach (var candidate in new[] { element,linkedDoc.GetElement(element.GetTypeId()) }.Where(e=>e!=null))
+                        foreach (Parameter parameter in candidate.Parameters)
+                        {
+                            string name=parameter.Definition.Name;
+                            if (!name.StartsWith("Pset",StringComparison.OrdinalIgnoreCase) && !name.StartsWith("Qto",StringComparison.OrdinalIgnoreCase)) continue;
+                            string value=ParameterText(parameter,linkedDoc); if (string.IsNullOrEmpty(value)) continue;
+                            int split=name.IndexOf('.'); if (split<0) split=name.IndexOf(':');
+                            row.IfcProperties.Add(new IfcPropertyValue { Scope=candidate.Id==element.Id ? "Revit link / Instance" : "Revit link / Type",
+                                SetName=split<0 ? "IFC parameter" : name.Substring(0,split),Name=split<0 ? name : name.Substring(split+1),Value=value });
+                        }
                         rows.Add(row);
                     }
                     window.AirTerminals = rows.OrderBy(row => row.SystemType).ThenBy(row => row.SystemName)
@@ -113,7 +124,7 @@ namespace IFCInfo
                     if (ifc != null)
                         window.IfcSourceStatus = string.Format("IFC gốc: {0}\nKhớp GUID: {1}/{2} phần tử trong link. IFC có {3} phần tử nguồn thuộc nhóm {4}. " +
                             "Dữ liệu lấy từ phiên bản IFC trên đĩa; hãy reload link nếu IFC đã thay đổi.",
-                            ifcPath, matched, terminals.Count, sourceElements.Count, isDuct ? "Duct" : "Air Terminal");
+                            ifcPath, matched, terminals.Count, sourceElements.Count, "IFC Product");
                 }
             }
             catch (Exception ex)

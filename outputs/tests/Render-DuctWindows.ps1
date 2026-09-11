@@ -31,10 +31,46 @@ $scroll.ScrollToEnd()
 Render $window 'duct-settings-options.png' 900 690
 $window.Close()
 $rows=New-Object 'System.Collections.Generic.List[IFCInfo.DuctRunRow]'
-$row=New-Object IFCInfo.DuctRunRow; $row.SourceId='123'; $row.TargetId='456'; $row.Status='Created'; $row.Success=$true; $rows.Add($row)
+$row=New-Object IFCInfo.DuctRunRow; $row.SourceId='123'; $row.TargetId='456'; $row.Status='Created'; $row.Success=$true
+$row.IfcPsets="Instance | Pset_WallCommon.FireRating = 60 min`nType | Pset_Type.Manufacturer = Test Company"; $rows.Add($row)
 $type=$assembly.GetType('IFCInfo.DuctCreationResultWindow')
 $constructor=$type.GetConstructors([Reflection.BindingFlags]'Instance,NonPublic')[0]
-$result=$constructor.Invoke([object[]]@($rows.PSObject.BaseObject,$false,[Action]{}))
+$result=$constructor.Invoke([object[]]@($rows.PSObject.BaseObject,$false,[Action]{},'IFC results'))
 Render $result 'duct-results.png' 1050 600
 $result.Close()
-Write-Output 'Two WPF windows constructed and rendered offscreen.'
+$sourceRows=New-Object 'System.Collections.Generic.List[IFCInfo.AirTerminalRow]'; $sourceRows.Add($item.Source)
+$nativeTypes=New-Object 'System.Collections.Generic.List[IFCInfo.ReplacementTypeOption]'
+foreach ($kind in @('Family','Pipe','Wall','Floor','Roof','Unsupported')) {
+    $option=New-Object IFCInfo.ReplacementTypeOption
+    $option.Id=10+$nativeTypes.Count; $option.CategoryId=$option.Id; $option.CategoryName=$kind; $option.Kind=$kind; $option.Label=$kind+' test type'
+    $option.Supported=$kind -ne 'Unsupported'; $option.Placement='Native placement test'
+    $nativeTypes.Add($option)
+}
+$nativeLevels=New-Object 'System.Collections.Generic.List[IFCInfo.ReplacementLevelOption]'
+$level=New-Object IFCInfo.ReplacementLevelOption; $level.Id=1; $level.Label='Level 1'; $nativeLevels.Add($level)
+$nativeSystems=New-Object 'System.Collections.Generic.List[IFCInfo.ReplacementTypeOption]'
+$system=New-Object IFCInfo.ReplacementTypeOption; $system.Id=20; $system.Kind='Pipe'; $system.Label='Water'; $nativeSystems.Add($system)
+$native=New-Object IFCInfo.NativePlacementWindow -ArgumentList $sourceRows,$nativeTypes,$nativeLevels,$nativeSystems,12
+Render $native 'native-placement.png' 780 700
+function Controls($root) {
+    if ($root -is [Windows.FrameworkElement] -and $root.Name) { $root }
+    for ($i=0; $i -lt [Windows.Media.VisualTreeHelper]::GetChildrenCount($root); $i++) { Controls ([Windows.Media.VisualTreeHelper]::GetChild($root,$i)) }
+}
+$controls=@(Controls $native.Content)
+$category=$controls | Where-Object Name -eq TargetCategory | Select-Object -First 1
+$typeBox=$controls | Where-Object Name -eq TargetType | Select-Object -First 1
+$systemBox=$controls | Where-Object Name -eq TargetSystem | Select-Object -First 1
+$create=$controls | Where-Object Name -eq CreateNative | Select-Object -First 1
+if ($category.SelectedItem.Name -ne 'Wall') { throw 'Source category default failed' }
+$typeBox.SelectedIndex=0
+if (!$create.IsEnabled -or $systemBox.IsEnabled) { throw 'Wall placement validation failed' }
+$category.SelectedItem=@($category.Items | Where-Object Name -eq Pipe)[0]; $typeBox.SelectedIndex=0
+if (!$systemBox.IsEnabled -or !$create.IsEnabled) { throw 'Pipe system selection failed' }
+$category.SelectedItem=@($category.Items | Where-Object Name -eq Unsupported)[0]; $typeBox.SelectedIndex=0
+if ($create.IsEnabled) { throw 'Unsupported type must be disabled' }
+$category.SelectedItem=@($category.Items | Where-Object Name -eq Wall)[0]; $typeBox.SelectedIndex=0
+Render $native 'native-placement.png' 780 700
+$scroll=$native.Content.Children | Where-Object { $_ -is [Windows.Controls.ScrollViewer] } | Select-Object -First 1
+$scroll.ScrollToEnd(); Render $native 'native-placement-options.png' 780 700
+$native.Close()
+Write-Output 'Three WPF windows rendered; 4 category/type validation checks passed.'

@@ -23,6 +23,7 @@ namespace IFCInfo
         }
         private readonly Dictionary<int, Entity> entities = new Dictionary<int, Entity>();
         private readonly Dictionary<int, double[]> placements = new Dictionary<int, double[]>();
+        public Dictionary<string, IfcTerminalSource> Products { get; private set; } = new Dictionary<string, IfcTerminalSource>(StringComparer.Ordinal);
         public Dictionary<string, IfcTerminalSource> Terminals
         {
             get; private set;
@@ -184,10 +185,35 @@ namespace IFCInfo
             { /* Unknown units must never be silently interpreted as metres. */
             }
 
-            foreach (int id in ids.Union(ductIds))
+            var productIds = entities.Where(p =>
+                (Ref(p.Value.At(5)) != 0 && entities.ContainsKey(Ref(p.Value.At(5))) && Get(Ref(p.Value.At(5))).Kind.EndsWith("PLACEMENT",StringComparison.Ordinal)) ||
+                (Ref(p.Value.At(6)) != 0 && entities.ContainsKey(Ref(p.Value.At(6))) && Get(Ref(p.Value.At(6))).Kind == "IFCPRODUCTDEFINITIONSHAPE"))
+                .Select(p=>p.Key).Union(ids).Union(ductIds).ToList();
+            var propertySets = new Dictionary<int,List<Tuple<int,string>>>();
+            foreach (var rel in entities.Values.Where(e=>e.Kind=="IFCRELDEFINESBYPROPERTIES"))
+            foreach (int productId in Refs(rel.At(4)))
+            {
+                if (!propertySets.ContainsKey(productId)) propertySets[productId]=new List<Tuple<int,string>>();
+                if (Ref(rel.At(5))!=0) propertySets[productId].Add(Tuple.Create(Ref(rel.At(5)),"Instance"));
+                else
+                {
+                    string token=rel.At(5); int start=token.IndexOf('(');
+                    if (start>=0) foreach (int setId in Refs(token.Substring(start+1,token.Length-start-2))) propertySets[productId].Add(Tuple.Create(setId,"Instance"));
+                }
+            }
+            foreach (var rel in entities.Values.Where(e=>e.Kind=="IFCRELDEFINESBYTYPE"))
+            foreach (int productId in Refs(rel.At(4)))
+            {
+                if (!propertySets.ContainsKey(productId)) propertySets[productId]=new List<Tuple<int,string>>();
+                foreach (int setId in Refs(Get(Ref(rel.At(5))).At(5))) propertySets[productId].Add(Tuple.Create(setId,"Type"));
+            }
+            foreach (int id in productIds)
             {
                 Entity product = Get(id);
                 var result = new IfcTerminalSource { Guid = Label(product.At(0)), Name = Label(product.At(2)) };
+                if (string.IsNullOrEmpty(result.Guid) || !product.At(0).StartsWith("'",StringComparison.Ordinal)) continue;
+                if (propertySets.TryGetValue(id,out var sets))
+                    foreach (var set in sets.Distinct()) ReadPropertySet(set.Item1,set.Item2,result.Properties);
                 HashSet<int> groups;
                 if (membership.TryGetValue(id, out groups))
                 {
@@ -208,7 +234,7 @@ namespace IFCInfo
                 }
                 if (ids.Contains(id))
                     Terminals.Add(result.Guid, result);
-                if (ductIds.Contains(id))
+                if (Ref(product.At(6))!=0)
                 {
                     try
                     {
@@ -218,9 +244,51 @@ namespace IFCInfo
                     {
                         result.GeometryError = ex.Message;
                     }
-                    Ducts.Add(result.Guid, result);
+                    if (ductIds.Contains(id)) Ducts.Add(result.Guid, result);
                 }
+                Products[result.Guid]=result;
             }
+        }
+        private void ReadPropertySet(int id,string scope,List<IfcPropertyValue> output)
+        {
+            var set=Get(id);
+            if (set.Kind!="IFCPROPERTYSET" && set.Kind!="IFCELEMENTQUANTITY") return;
+            foreach (int property in Refs(set.At(set.Kind=="IFCPROPERTYSET" ? 4 : 5)))
+                ReadProperty(property,scope,Label(set.At(2)),"",output,new HashSet<int>());
+        }
+        private void ReadProperty(int id,string scope,string setName,string prefix,List<IfcPropertyValue> output,HashSet<int> path)
+        {
+            if (path.Count>=32 || !path.Add(id)) return;
+            var p=Get(id); string name=prefix+Label(p.At(0));
+            if (p.Kind=="IFCCOMPLEXPROPERTY")
+                foreach (int child in Refs(p.At(3))) ReadProperty(child,scope,setName,name+".",output,path);
+            else
+            {
+                string value,unit="$";
+                switch (p.Kind)
+                {
+                    case "IFCPROPERTYSINGLEVALUE": value=PropertyToken(p.At(2)); unit=p.At(3); break;
+                    case "IFCPROPERTYENUMERATEDVALUE": case "IFCPROPERTYLISTVALUE": value=PropertyToken(p.At(2)); unit=p.Kind=="IFCPROPERTYLISTVALUE"?p.At(3):"$"; break;
+                    case "IFCPROPERTYBOUNDEDVALUE": value="Upper="+PropertyToken(p.At(2))+"; Lower="+PropertyToken(p.At(3))+"; Setpoint="+PropertyToken(p.At(5)); unit=p.At(4); break;
+                    default:
+                        if (p.Kind.StartsWith("IFCQUANTITY",StringComparison.Ordinal)) { value=PropertyToken(p.At(3)); unit=p.At(2); }
+                        else value=p.Kind+": "+string.Join(", ",p.Args.Skip(2).Select(PropertyToken));
+                        break;
+                }
+                string unitText="";
+                if (Ref(unit)!=0 && entities.TryGetValue(Ref(unit),out var u)) unitText=u.Kind=="IFCSIUNIT" ? (u.At(2)=="$"?"":u.At(2).Trim('.'))+u.At(3).Trim('.') : u.Kind=="IFCCONVERSIONBASEDUNIT" ? Label(u.At(2)) : unit;
+                output.Add(new IfcPropertyValue { Scope=scope,SetName=setName,Name=name,Value=value,Unit=unitText });
+            }
+            path.Remove(id);
+        }
+        private static string PropertyToken(string token)
+        {
+            if (token=="$" || token=="*") return "";
+            if (token.StartsWith("'",StringComparison.Ordinal)) return Label(token);
+            if (token.StartsWith("(",StringComparison.Ordinal)) return string.Join("; ",Split(token.Substring(1,token.Length-2),',').Select(PropertyToken));
+            int start=token.IndexOf('(');
+            if (start>0 && token.EndsWith(")",StringComparison.Ordinal)) return PropertyToken(token.Substring(start+1,token.Length-start-2));
+            return token;
         }
         private static string EmptyLabel(string value)
         {

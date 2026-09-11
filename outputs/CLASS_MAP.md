@@ -25,14 +25,17 @@ Các đường dẫn trên tính từ `src/`.
 | Giao diện chính, cột bảng, xuất clipboard | `UI/IFCInfoWindow.cs` |
 | Màu sắc, icon, dropdown, thanh bước | `UI/UiDesign.cs` |
 | Chọn type và ánh xạ hệ thống trước khi tạo ống | `UI/DuctCreationWindow.cs` |
-| Chọn family / Level để tạo miệng gió | `UI/AirTerminalReplacementWindow.cs` |
-| Đọc IFC2X3, đơn vị, hệ thống, kích thước | `Ifc/IfcSourceReader.cs` |
+| Chọn Category/Type/Level và cách đặt native | `UI/NativePlacementWindow.cs` |
+| Đọc IFC2X3/IFC4, đơn vị, hệ thống, kích thước, Pset/Qto | `Ifc/IfcSourceReader.cs` |
 | Chuẩn bị và kiểm tra danh sách ống sẽ tạo | `Services/Ducts/DuctWorkflow.cs` |
 | Duct đã tồn tại ở vị trí nguồn hay chưa | `Services/Ducts/DuctExistenceChecker.cs` |
 | Thuật toán trùng toàn bộ / một phần đường tim, độc lập Revit | `Services/Ducts/DuctCoverage.cs` |
 | Đọc solid hoặc Duct native, xác định hình học | `Services/Ducts/DuctGeometryReader.cs` |
 | Duct.Create, đặt kích thước, góc, transaction, chống tạo lại | `Services/Ducts/DuctCreation.cs` |
-| Tạo miệng gió, chọn host, chống tạo lại | `Services/AirTerminals/AirTerminalReplacement.cs` |
+| Danh sách Category/Type trong model chính | `Services/PlacementCatalog.cs` |
+| Đặt family/tuyến native, host/adaptive, chống tạo lại | `Services/NativePlacement.cs` |
+| Dựng Wall/Floor/Roof và kiểm tra solid | `Services/NativeBuildingPlacement.cs` |
+| Lưu Pset nguồn kèm phần tử | `Services/IfcPropertyStorage.cs` |
 
 ## Các class dữ liệu — Models/
 
@@ -68,7 +71,9 @@ flowchart TD
     Settings --> Request[DuctRequest]
     Request --> Command
     Command --> Create[DuctCreation]
-    Command --> Terminal[AirTerminalReplacement]
+    Command --> Native[NativePlacement]
+    Native --> Building[NativeBuildingPlacement]
+    Native --> Properties[IfcPropertyStorage]
 ```
 
 ## Điểm cần lưu ý khi kiểm tra
@@ -76,7 +81,7 @@ flowchart TD
 - Tạo Duct: dung sai hình học giữ nguyên `0.002 feet` (khoảng 0,6 mm).
 - Cột đối chiếu Duct: so đường tim và kích thước với sai số `1 mm`, kiểm tra System Type đích khi xác định được. Xem `DUCT_COMPARISON.md` về trạng thái và giới hạn.
 - `DuctWorkflow.Configure` phải chạy sau `CategoryReader.Configure`: workflow bổ sung bước kiểm tra tồn tại vào callback đọc Category.
-- Thay đổi lần này là tổ chức lại mã, không thay đổi quy tắc tạo ống hoặc giao diện.
+- Bản mở rộng Category/native/Pset thay thế luồng AirTerminalReplacement cũ bằng NativePlacement. Xem CATEGORY_NATIVE_PSET.md để biết phạm vi hiện tại.
 - Project chỉ compile `src/**/*.cs`. Bản mã cũ được chuyển sang thư mục backup trong `work/`, tránh có hai bản dễ nhầm.
 
 ## Kiểm tra đã chạy

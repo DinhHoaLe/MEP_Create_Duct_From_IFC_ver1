@@ -40,7 +40,7 @@ namespace IFCInfo
                     DuctWorkflow.Configure(dialog, doc, link);
                     selectedLink = link;
                 };
-                AirTerminalReplacement.Configure(dialog, doc);
+                PlacementCatalog.Configure(dialog, doc);
                 new System.Windows.Interop.WindowInteropHelper(dialog).Owner = commandData.Application.MainWindowHandle;
                 dialog.ShowDialog();
                 if (selectedLink != null)
@@ -55,7 +55,7 @@ namespace IFCInfo
                         DuctNavigation.Execute(uiDoc, selectedLink, dialog.NavigationRow, dialog.NavigationAction);
                         return Result.Succeeded;
                     }
-                    AirTerminalReplacement.Execute(uiDoc, selectedLink, dialog);
+                    NativePlacement.Execute(uiDoc, selectedLink, dialog);
                     DuctCreation.Execute(uiDoc, dialog);
                 }
                 return Result.Succeeded;
