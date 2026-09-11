@@ -63,6 +63,7 @@ namespace IFCInfo
         public string IfcSourceStatus { get; set; } = "Chưa đọc IFC gốc.";
         public List<AirTerminalRow> AirTerminals { get; set; } = new List<AirTerminalRow>();
         public List<ReplacementTypeOption> ReplacementTypes { get; set; } = new List<ReplacementTypeOption>();
+        public List<ReplacementTypeOption> ReplacementSystems { get; set; } = new List<ReplacementTypeOption>();
         public List<ReplacementLevelOption> ReplacementLevels { get; set; } = new List<ReplacementLevelOption>();
         public ReplacementRequest Replacement
         {
@@ -87,7 +88,7 @@ namespace IFCInfo
 
         public IFCInfoWindow()
         {
-            Title = "Tạo MEP từ IFC";
+            Title = "Tạo phần tử Revit từ IFC";
             Width = 1160;
             Height = 800;
             MinWidth = 640;
@@ -160,7 +161,7 @@ namespace IFCInfo
             var next = Button("Tiếp tục →", true);
             next.IsEnabled = false;
             buttons.Children.Add(next);
-            var replace = Button("Thay thế Air Terminal →", true);
+            var replace = Button("Đặt theo Category / Type →", true);
             replace.Visibility = Visibility.Collapsed;
             buttons.Children.Add(replace);
             var create = Button("Tạo Duct →", true);
@@ -184,11 +185,11 @@ namespace IFCInfo
             var sourceTitle = Text("Thông tin nguồn", 22, "#102A50");
             sourceTitle.FontWeight = FontWeights.SemiBold;
             card.Children.Add(sourceTitle);
-            var description = Text("Chọn IFC link và Category để tạo MEP từ mô hình IFC.", 15, "#647FA6");
+            var description = Text("Chọn IFC link và Category nguồn, sau đó chọn Category / Type đích trong Revit.", 15, "#647FA6");
             description.Margin = new Thickness(0, 8, 0, 0);
             card.Children.Add(description);
             var linkBox = UiDesign.Field(card, "IFC link", "Chọn link nguồn từ mô hình IFC", "Chọn IFC link...", false);
-            var categoryBox = UiDesign.Field(card, "Category", "Chọn Category cần tạo MEP", "Chọn Category...", true);
+            var categoryBox = UiDesign.Field(card, "Category nguồn", "Các category có phần tử trong IFC link", "Chọn Category...", true);
             categoryBox.IsEnabled = false;
             var scroll = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
             root.Children.Add(scroll);
@@ -267,10 +268,10 @@ namespace IFCInfo
                 var selected = AirTerminals.Where(row => row.IsSelected && row.CanSelect).ToList();
                 if (selected.Count == 0)
                 {
-                    feedback.Text = "Hãy tích chọn ít nhất một Air Terminal.";
+                    feedback.Text = "Hãy tích chọn ít nhất một phần tử nguồn.";
                     return;
                 }
-                var dialog = new AirTerminalReplacementWindow(selected, ReplacementTypes, ReplacementLevels) { Owner = this };
+                var dialog = new NativePlacementWindow(selected, ReplacementTypes, ReplacementLevels,ReplacementSystems,SelectedCategory.Id) { Owner = this };
                 if (dialog.ShowDialog() == true)
                 {
                     Replacement = dialog.Request;

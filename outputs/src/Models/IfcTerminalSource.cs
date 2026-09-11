@@ -13,5 +13,15 @@
         public double HeightMm { get; set; }
         public double DiameterMm { get; set; }
         public string GeometryError { get; set; }
+        public System.Collections.Generic.List<IfcPropertyValue> Properties { get; set; } = new System.Collections.Generic.List<IfcPropertyValue>();
+    }
+    public sealed class IfcPropertyValue
+    {
+        public string Scope { get; set; }
+        public string SetName { get; set; }
+        public string Name { get; set; }
+        public string Value { get; set; }
+        public string Unit { get; set; }
+        public override string ToString() => Scope + " | " + SetName + "." + Name + " = " + Value + (string.IsNullOrEmpty(Unit) ? "" : " [" + Unit + "]");
     }
 }
