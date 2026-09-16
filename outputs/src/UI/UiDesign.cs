@@ -55,7 +55,7 @@ namespace IFCInfo
             var grid = new Grid { Width = 340, VerticalAlignment = VerticalAlignment.Center };
             for (int i = 0; i < 5; i++)
                 grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(i % 2 == 0 ? 90 : 35) });
-            var labels = new[] { "Chọn link\nvà Category", "Thiết lập\n(MEP)", "Tạo và hoàn tất" };
+            var labels = new[] { "Chọn link\nvà Category", "Chọn phần tử\nvà Type", "Tạo và hoàn tất" };
             for (int i = 0; i < 3; i++)
             {
                 bool current = i + 1 == active;

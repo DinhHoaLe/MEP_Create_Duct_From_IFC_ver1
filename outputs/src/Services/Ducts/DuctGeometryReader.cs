@@ -15,13 +15,13 @@ namespace IFCInfo
         internal const double Tolerance = 0.002; // feet, khoảng 0.6 mm
         public static DuctPlanItem Read(Element source, IfcTerminalSource expected)
         {
-            var native = source as Duct;
+            var native = source as MEPCurve;
             var line = (source.Location as LocationCurve)?.Curve as Line;
             if (native != null && line != null)
             {
                 var connector = native.ConnectorManager.Connectors.Cast<Connector>().First(c => c.ConnectorType == ConnectorType.End);
                 if (connector.Shape != ConnectorProfileType.Round && connector.Shape != ConnectorProfileType.Rectangular)
-                    throw new NotSupportedException("Chưa hỗ trợ Duct oval.");
+                    throw new NotSupportedException("Chưa hỗ trợ tiết diện oval.");
                 return new DuctPlanItem
                 {
                     Start = line.GetEndPoint(0),

@@ -21,6 +21,8 @@ namespace IFCInfo
         }
         public event PropertyChangedEventHandler PropertyChanged;
         public IfcTerminalSource DuctSource { get; set; }
+        public System.Collections.Generic.List<IfcPropertyValue> IfcProperties { get; set; } = new System.Collections.Generic.List<IfcPropertyValue>();
+        public string PsetSummary => IfcProperties.Count == 0 ? "Không có Pset" : IfcProperties.Count + " thuộc tính";
         public System.Collections.Generic.List<long> CorrespondingDuctIds { get; set; } = new System.Collections.Generic.List<long>();
         private string ductExistence = "Chưa xác định";
         public bool CanSelect => ductExistence != "Đã tồn tại" && ductExistence != "Khớp hoàn toàn"

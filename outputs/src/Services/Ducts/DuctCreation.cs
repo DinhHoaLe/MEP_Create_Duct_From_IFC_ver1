@@ -42,7 +42,7 @@ namespace IFCInfo
                 {
                     foreach (var item in request.Items)
                     {
-                        var row=new DuctRunRow { RunId=run,SourceId=item.Source.ElementId,IfcGuid=item.Source.IfcGuid }; rows.Add(row);
+                        var row=new DuctRunRow { RunId=run,SourceId=item.Source.ElementId,IfcGuid=item.Source.IfcGuid,IfcPsets=IfcPropertyStorage.Text(item.Source) }; rows.Add(row);
                         try
                         {
                             if (item.ExistingId==0 && existing.Contains(item.Key)) throw new InvalidOperationException("Nguồn đã được tạo trước đó.");
@@ -158,17 +158,22 @@ namespace IFCInfo
                 !DuctGeometryReader.Near(duct.get_Parameter(BuiltInParameter.RBS_CURVE_WIDTH_PARAM).AsDouble(),item.Width) ||
                 !DuctGeometryReader.Near(duct.get_Parameter(BuiltInParameter.RBS_CURVE_HEIGHT_PARAM).AsDouble(),item.Height))
                 throw new InvalidOperationException("Kích thước sau regenerate không khớp IFC.");
+            RecordSource(duct,item.Key,item.Source,system.Value);
+            IfcPropertyStorage.Save(duct,item.Source);
+            var comments=duct.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
+            if (comments!=null && !comments.IsReadOnly) comments.Set("IFC GUID: "+item.Source.IfcGuid+" | System Name: "+item.Source.SystemName+" | System Type: "+item.Source.SystemType);
+            return duct;
+        }
+        internal static void RecordSource(Duct duct,string key,AirTerminalRow row,long system)
+        {
             var schema=Schema.Lookup(TrackingId);
             if (schema==null)
             {
                 var b=new SchemaBuilder(TrackingId); b.SetSchemaName("IFCInfoDuctSource");
                 foreach (var f in new[] { "SourceKey","SystemName","SystemType" }) b.AddSimpleField(f,typeof(string)); schema=b.Finish();
             }
-            var e=new Entity(schema); e.Set(schema.GetField("SourceKey"),item.Key); e.Set(schema.GetField("SystemName"),item.Source.SystemName??""); e.Set(schema.GetField("SystemType"),item.Source.SystemType??""); duct.SetEntity(e);
-            DuctExistenceChecker.RecordMapping(duct,item.Key,item.Source.SystemType,system.Value);
-            var comments=duct.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
-            if (comments!=null && !comments.IsReadOnly) comments.Set("IFC GUID: "+item.Source.IfcGuid+" | System Name: "+item.Source.SystemName+" | System Type: "+item.Source.SystemType);
-            return duct;
+            var e=new Entity(schema); e.Set(schema.GetField("SourceKey"),key); e.Set(schema.GetField("SystemName"),row.SystemName??""); e.Set(schema.GetField("SystemType"),row.SystemType??""); duct.SetEntity(e);
+            DuctExistenceChecker.RecordMapping(duct,key,row.SystemType,system);
         }
         private static void SetId(Duct d,BuiltInParameter name,ElementId value)
         {
