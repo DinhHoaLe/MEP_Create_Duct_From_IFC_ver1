@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
@@ -33,7 +33,7 @@ namespace IFCInfo
                 dialog.LoadLink = option =>
                 {
                     selectedLink = null;
-                    var link = doc.GetElement(new ElementId(option.Id)) as RevitLinkInstance;
+                    var link = doc.GetElement(ElementIds.Create(option.Id)) as RevitLinkInstance;
                     if (link?.GetLinkDocument() == null)
                         throw new InvalidOperationException("Link chưa được load.");
                     CategoryReader.Configure(dialog, link.GetLinkDocument(), option);

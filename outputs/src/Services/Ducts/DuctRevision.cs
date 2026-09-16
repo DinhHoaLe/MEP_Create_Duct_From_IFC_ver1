@@ -22,9 +22,9 @@ namespace IFCInfo
             var c = d.ConnectorManager.Connectors.Cast<Connector>().First(x => x.ConnectorType == ConnectorType.End);
             bool round = c.Shape == ConnectorProfileType.Round;
             return Geometry(line.GetEndPoint(0),line.GetEndPoint(1),c.CoordinateSystem.BasisX,
-                round ? 0 : c.Width,round ? 0 : c.Height,round ? c.Radius*2 : 0) + "|" + d.GetTypeId().Value
-                + "|" + d.get_Parameter(BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM)?.AsElementId().Value
-                + "|" + d.ReferenceLevel?.Id.Value + "|" + d.WorksetId.IntegerValue
+                round ? 0 : c.Width,round ? 0 : c.Height,round ? c.Radius*2 : 0) + "|" + d.GetTypeId().Number()
+                + "|" + d.get_Parameter(BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM)?.AsElementId().Number()
+                + "|" + d.ReferenceLevel?.Id.Number() + "|" + d.WorksetId.IntegerValue
                 + "|" + d.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString()
                 + "|" + d.Pinned + "|" + string.Join(",",d.ConnectorManager.Connectors.Cast<Connector>()
                     .Where(p=>p.ConnectorType==ConnectorType.End).SelectMany(p=>p.AllRefs.Cast<Connector>())

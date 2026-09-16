@@ -13,6 +13,8 @@ namespace IFCInfo
     public sealed class IFCInfoWindow : Window
     {
         private readonly TextBlock feedback;
+        private readonly Button zoomSource;
+        private AirTerminalRow focusedSource;
         public AirTerminalRow NavigationRow { get; private set; }
         public string NavigationAction { get; private set; }
         public Func<List<AirTerminalRow>, DuctRequest> PrepareUpdates { get; set; }
@@ -61,6 +63,7 @@ namespace IFCInfo
         public string IfcSourceStatus { get; set; } = "Chưa đọc IFC gốc.";
         public List<AirTerminalRow> AirTerminals { get; set; } = new List<AirTerminalRow>();
         public List<ReplacementTypeOption> ReplacementTypes { get; set; } = new List<ReplacementTypeOption>();
+        public Func<string,long,List<ReplacementTypeOption>> LoadPlacementFamily { get; set; }
         public List<ReplacementTypeOption> ReplacementSystems { get; set; } = new List<ReplacementTypeOption>();
         public List<ReplacementLevelOption> ReplacementLevels { get; set; } = new List<ReplacementLevelOption>();
         public ReplacementRequest Replacement
@@ -87,7 +90,7 @@ namespace IFCInfo
         public IFCInfoWindow()
         {
             Title = "Tạo phần tử Revit từ IFC";
-            Width = 1160;
+            Width = Math.Min(1500, SystemParameters.WorkArea.Width);
             Height = 800;
             MinWidth = 640;
             MinHeight = 540;
@@ -131,9 +134,6 @@ namespace IFCInfo
             DockPanel.SetDock(footer, Dock.Bottom);
             root.Children.Add(footer);
             var status = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 8, 16, 8) };
-            var info = Text("ⓘ", 24, "#7A96BA");
-            info.Margin = new Thickness(0, 0, 14, 0);
-            status.Children.Add(info);
             feedback = Text("Chọn IFC link và Category để tiếp tục.", 14, "#647FA6");
             feedback.MaxWidth = 310;
             status.Children.Add(feedback);
@@ -152,17 +152,14 @@ namespace IFCInfo
             var back = Button("← Quay lại", false);
             back.Visibility = Visibility.Collapsed;
             buttons.Children.Add(back);
-            var copy = Button("Sao chép bảng", false);
-            copy.Visibility = Visibility.Collapsed;
-            buttons.Children.Add(copy);
-            copy.Click += (s, e) => Copy(SystemTableText());
+            zoomSource=Button("Zoom tới nguồn IFC",false);
+            zoomSource.Visibility=Visibility.Collapsed; zoomSource.IsEnabled=false;
+            zoomSource.Click+=(s,e)=> { if(focusedSource==null) return; NavigationRow=focusedSource; NavigationAction="Zoom tới nguồn IFC"; Close(); };
+            buttons.Children.Add(zoomSource);
             var next = Button("Tiếp tục →", true);
             next.IsEnabled = false;
             buttons.Children.Add(next);
-            var replace = Button("Đặt theo Category / Type →", true);
-            replace.Visibility = Visibility.Collapsed;
-            buttons.Children.Add(replace);
-            var create = Button("Tạo Duct →", true);
+            var create = Button("Tạo family →", true);
             create.Visibility = Visibility.Collapsed;
             buttons.Children.Add(create);
             var close = Button("Đóng", false);
@@ -241,27 +238,30 @@ namespace IFCInfo
                 heading.Text = SelectedCategory.Name;
                 progress.Content = UiDesign.Steps(2);
                 subtitle.Text = "Bước 2 · Chọn phần tử";
+                header.Margin = new Thickness(38, 24, 38, 4);
                 scroll.Content = CountPage();
                 scroll.ScrollToTop();
                 next.Visibility = Visibility.Collapsed;
                 back.Visibility = Visibility.Visible;
-                copy.Visibility = Visibility.Visible;
-                replace.Visibility = CanReplaceCategory ? Visibility.Visible : Visibility.Collapsed;
-                create.Visibility = CanCreateDucts ? Visibility.Visible : Visibility.Collapsed;
-                feedback.Text = "Tích chọn các phần tử cần tạo trong model chính.";
+                zoomSource.Visibility=Visibility.Visible;
+                create.Content = "Tạo family →";
+                create.Visibility = CanCreateDucts || CanReplaceCategory ? Visibility.Visible : Visibility.Collapsed;
+                feedback.Text = "";
             };
             back.Click += (s, e) =>
             {
+                header.Margin = new Thickness(38, 34, 38, 28);
                 heading.Text = "Chọn link và Category";
                 subtitle.Text = "Bước 1 · Chọn nguồn để tiếp tục";
                 progress.Content = UiDesign.Steps(1);
                 scroll.Content = body;
                 scroll.ScrollToTop();
                 next.Visibility = Visibility.Visible;
-                back.Visibility = copy.Visibility = replace.Visibility = create.Visibility = Visibility.Collapsed;
+                back.Visibility = create.Visibility = Visibility.Collapsed;
+                zoomSource.Visibility=Visibility.Collapsed; zoomSource.IsEnabled=false; focusedSource=null;
                 feedback.Text = "Chọn IFC link và Category.";
             };
-            replace.Click += (s, e) =>
+            Action openPlacement = () =>
             {
                 var selected = AirTerminals.Where(row => row.IsSelected && row.CanSelect).ToList();
                 if (selected.Count == 0)
@@ -269,7 +269,15 @@ namespace IFCInfo
                     feedback.Text = "Hãy tích chọn ít nhất một phần tử nguồn.";
                     return;
                 }
-                var dialog = new NativePlacementWindow(selected, ReplacementTypes, ReplacementLevels,ReplacementSystems,SelectedCategory.Id) { Owner = this };
+                if (SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves || SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_CableTray)
+                {
+                    string kind=SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves?"Pipe":"CableTray";
+                    var curveDialog=new CurveCreationWindow(selected,ReplacementTypes,ReplacementLevels,ReplacementSystems,SelectedCategory.Id,kind) { Owner=this };
+                    if(curveDialog.ShowDialog()==true) { Replacement=curveDialog.Request; Close(); }
+                    return;
+                }
+                var dialog = new NativePlacementWindow(selected, ReplacementTypes, ReplacementLevels,ReplacementSystems,SelectedCategory.Id,
+                    SelectedCategory.Name, LoadPlacementFamily) { Owner = this };
                 if (dialog.ShowDialog() == true)
                 {
                     Replacement = dialog.Request;
@@ -278,6 +286,7 @@ namespace IFCInfo
             };
             create.Click += (s, e) =>
             {
+                if (!CanCreateDucts) { openPlacement(); return; }
                 var selected = AirTerminals.Where(row => row.IsSelected && row.CanSelect).ToList();
                 if (selected.Count == 0)
                 {
@@ -299,30 +308,11 @@ namespace IFCInfo
 
         private FrameworkElement CountPage()
         {
-            var panel = new StackPanel { Margin = new Thickness(28, 22, 28, 20) };
-            var card = new Border
-            {
-                Background = Brushes.White,
-                CornerRadius = new CornerRadius(10),
-                BorderBrush = Brush("#DFE6EE"),
-                BorderThickness = new Thickness(1),
-                Padding = new Thickness(24)
-            };
-            var stack = new StackPanel();
-            stack.Children.Add(Text(SelectedCategory.Name.ToUpperInvariant(), 12, "#60738A"));
-            var count = Text(AirTerminalCount.HasValue ? AirTerminalCount.Value.ToString("N0") : "—", 40, "#176BBD");
-            count.FontWeight = FontWeights.SemiBold;
-            count.Margin = new Thickness(0, 8, 0, 2);
-            stack.Children.Add(count);
-            stack.Children.Add(Text(AirTerminalCount.HasValue ? "phần tử trong model link" : "Chưa có kết quả đếm", 14, "#395C7C"));
-            card.Child = stack;
-            panel.Children.Add(card);
-            var tableLabel = Text("CHI TIẾT HỆ THỐNG", 12, "#60738A");
-            tableLabel.Margin = new Thickness(0, 18, 0, 8);
-            panel.Children.Add(tableLabel);
+            var panel = new StackPanel { Margin = new Thickness(28, 0, 28, 20) };
+            var sourceView = new System.Windows.Data.ListCollectionView(AirTerminals);
             var table = new DataGrid
             {
-                ItemsSource = AirTerminals,
+                ItemsSource = sourceView,
                 AutoGenerateColumns = false,
                 IsReadOnly = false,
                 CanUserAddRows = false,
@@ -340,7 +330,8 @@ namespace IFCInfo
                 MinRowHeight = 34,
                 ColumnHeaderHeight = 36,
                 FontSize = 13,
-                SelectionUnit = DataGridSelectionUnit.CellOrRowHeader,
+                SelectionUnit = DataGridSelectionUnit.FullRow,
+                SelectionMode = DataGridSelectionMode.Extended,
                 ClipboardCopyMode = DataGridClipboardCopyMode.IncludeHeader,
                 EnableRowVirtualization = true,
                 EnableColumnVirtualization = true
@@ -384,7 +375,7 @@ namespace IFCInfo
                 table.Columns.Add(new DataGridTextColumn
                 {
                     Header = "Đối chiếu Duct",
-                    Width = 215,
+                    Width = new DataGridLength(150,DataGridLengthUnitType.Star),
                     IsReadOnly = true,
                     Binding = new System.Windows.Data.Binding("DuctExistence"),
                     ElementStyle = statusStyle
@@ -402,44 +393,175 @@ namespace IFCInfo
                     Header = column.Header,
                     IsReadOnly = true,
                     Binding = new System.Windows.Data.Binding(column.Property),
-                    Width = new DataGridLength(column.Width),
+                    Width = new DataGridLength(column.Width,DataGridLengthUnitType.Star),
                     ElementStyle = cellText
                 });
             }
-            var selectionBar = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
-            var selectAll = Button("Chọn tất cả", false);
-            selectAll.Click += (s, e) => { foreach (var row in AirTerminals) row.IsSelected = row.CanSelect; };
-            var selectNone = Button("Bỏ chọn", false);
-            selectNone.Click += (s, e) => { foreach (var row in AirTerminals) row.IsSelected = false; };
-            selectionBar.Children.Add(selectAll);
-            selectionBar.Children.Add(selectNone);
-            if (CanCreateDucts)
+            focusedSource=null; zoomSource.IsEnabled=false;
+            table.CurrentCellChanged+=(s,e)=> { focusedSource=table.CurrentCell.Item as AirTerminalRow; zoomSource.IsEnabled=focusedSource!=null; };
+            var details = new Grid();
+            details.ColumnDefinitions.Add(new ColumnDefinition());
+            details.ColumnDefinitions.Add(new ColumnDefinition { Width=new GridLength(350) });
+            details.RowDefinitions.Add(new RowDefinition { Height=GridLength.Auto });
+            details.RowDefinitions.Add(new RowDefinition { Height=GridLength.Auto });
+            details.RowDefinitions.Add(new RowDefinition { Height=GridLength.Auto });
+            table.Height=380;
+            details.RowDefinitions.Add(new RowDefinition { Height=GridLength.Auto });
+            var properties=new IfcPropertiesPanel { Height=380, Margin=new Thickness(12,0,0,0) };
+            var propertyToolbar=new DockPanel { Margin=new Thickness(12,0,0,8),LastChildFill=true };
+            var copyProperties=Button("⧉",false);
+            copyProperties.ToolTip="Sao chép toàn bộ thuộc tính và giá trị đang hiển thị";
+            copyProperties.Height=40; copyProperties.MinHeight=40;
+            copyProperties.Padding=new Thickness(14,0,14,0);
+            copyProperties.Click+=(s,e)=>
             {
-                foreach (string action in new[] { "Zoom tới nguồn IFC", "Chọn duct tương ứng", "Cô lập trong 3D" })
-                {
-                    var button = Button(action, false);
-                    button.Click += (s,e) =>
-                    {
-                        var row = table.CurrentCell.Item as AirTerminalRow;
-                        if (row == null) { feedback.Text = "Bấm vào một dòng trong bảng trước."; return; }
-                        NavigationRow = row; NavigationAction = action; Close();
-                    };
-                    selectionBar.Children.Add(button);
-                }
-                var update = Button("Xem trước cập nhật IFC", false);
-                update.Click += (s,e) =>
-                {
-                    try
-                    {
-                        var request = PrepareUpdates?.Invoke(AirTerminals);
-                        if (request != null) { DuctCreationRequest = request; Close(); }
-                    }
-                    catch (Exception ex) { feedback.Text = ex.Message; }
-                };
-                selectionBar.Children.Add(update);
+                try { Clipboard.SetText(properties.AllPropertyValues()); }
+                catch (System.Runtime.InteropServices.ExternalException) { feedback.Text="Clipboard đang bận. Hãy thử sao chép lại."; }
+            };
+            DockPanel.SetDock(copyProperties,Dock.Right); propertyToolbar.Children.Add(copyProperties);
+            var export=Button("Export",false);
+            export.Height=40; export.MinHeight=40; export.Padding=new Thickness(14,0,14,0); export.FontSize=14;
+            export.ToolTip="Xuất các phần tử đang tích chọn: CSV, TSV, JSON, XML";
+            export.Click+=(s,e)=>
+            {
+                var selected=AirTerminals.Where(r=>r.IsSelected).ToList();
+                if(selected.Count==0) { feedback.Text="Tích chọn ít nhất một đối tượng IFC để export."; return; }
+                var file=new Microsoft.Win32.SaveFileDialog {
+                    Filter="CSV (*.csv)|*.csv|TSV (*.tsv)|*.tsv|JSON (*.json)|*.json|XML (*.xml)|*.xml",
+                    FileName="IFC-selected",DefaultExt=".csv",AddExtension=true };
+                if(file.ShowDialog(this)!=true) return;
+                try {
+                    IfcSelectionExport.Export(file.FileName,selected,SelectedLink?.Name,SelectedCategory?.Name,file.FilterIndex);
+                    feedback.Text="Đã export "+selected.Count+" đối tượng IFC.";
+                } catch(Exception ex) {feedback.Text="Không export được: "+ex.Message;}
+            };
+            DockPanel.SetDock(export,Dock.Right); propertyToolbar.Children.Add(export);
+            properties.SelectionTotal.Margin=new Thickness(0);
+            properties.SelectionTotal.VerticalAlignment=VerticalAlignment.Center;
+            propertyToolbar.Children.Add(properties.SelectionTotal);
+            Grid.SetColumn(propertyToolbar,1); details.Children.Add(propertyToolbar);
+            Grid.SetColumn(properties,1);
+            Grid.SetRow(table,1); Grid.SetRow(properties,1);
+            details.Children.Add(table); details.Children.Add(properties);
+            var propertyRows=AirTerminals.ToList();
+            Action refreshProperties=()=>
+            {
+                var checkedRows=propertyRows.Where(r=>r.IsSelected).ToList();
+                properties.SetSelectionCount(checkedRows.Count, AirTerminalCount ?? propertyRows.Count);
+                properties.ShowSources(checkedRows.Count>0 ? checkedRows : table.SelectedItems.Cast<AirTerminalRow>().ToList());
+            };
+            bool refreshPending=false;
+            Action queueProperties=()=>
+            {
+                if (refreshPending) return;
+                refreshPending=true;
+                panel.Dispatcher.BeginInvoke(new Action(()=> { refreshPending=false; refreshProperties(); }),
+                    System.Windows.Threading.DispatcherPriority.DataBind);
+            };
+            PropertyChangedEventHandler checkedChanged=(s,e)=>
+            {
+                if (e.PropertyName==nameof(AirTerminalRow.IsSelected)) queueProperties();
+            };
+            bool listening=false;
+            Action subscribe=()=> { if (listening) return; foreach(var row in propertyRows) row.PropertyChanged+=checkedChanged; listening=true; };
+            Action unsubscribe=()=> { if (!listening) return; foreach(var row in propertyRows) row.PropertyChanged-=checkedChanged; listening=false; };
+            subscribe();
+            panel.Loaded+=(s,e)=> { subscribe(); queueProperties(); };
+            panel.Unloaded+=(s,e)=>unsubscribe();
+            table.SelectionChanged+=(s,e)=>queueProperties();
+            details.SizeChanged+=(s,e)=>
+            {
+                bool narrow=details.ActualWidth<900;
+                details.ColumnDefinitions[1].Width=narrow ? new GridLength(0) : new GridLength(350);
+                Grid.SetColumn(properties,narrow?0:1); Grid.SetRow(properties,narrow?2:1);
+                properties.Margin=narrow?new Thickness(0,12,0,0):new Thickness(12,0,0,0);
+                Grid.SetColumn(propertyToolbar,narrow?0:1);
+                Grid.SetRow(propertyToolbar,narrow?2:0);
+                Grid.SetRow(properties,narrow?3:1);
+            };
+            panel.Children.Add(details);
+            var summary = new DockPanel { Margin=new Thickness(0,0,0,8),LastChildFill=true };
+            var selectionButtons=new StackPanel { Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right };
+            var selectAll=Button("Chọn tất cả",false);
+            var selectNone=Button("Bỏ chọn",false);
+            var filter=Button("Filter",false);
+            var sort=Button("Sort",false);
+            foreach(var button in new[] { filter,sort,selectAll,selectNone })
+            {
+                button.Height=40; button.MinHeight=40;
+                button.Padding=new Thickness(14,0,14,0); button.FontSize=14;
+                button.HorizontalContentAlignment=HorizontalAlignment.Center;
+                button.VerticalContentAlignment=VerticalAlignment.Center;
+                selectionButtons.Children.Add(button);
             }
-            panel.Children.Add(selectionBar);
-            panel.Children.Add(table);
+            selectAll.Click+=(s,e)=> { foreach(var row in sourceView.Cast<AirTerminalRow>().ToList()) row.IsSelected=row.CanSelect; };
+            selectNone.Click+=(s,e)=> { foreach(var row in AirTerminals) row.IsSelected=false; };
+            DockPanel.SetDock(selectionButtons,Dock.Right); summary.Children.Add(selectionButtons);
+            var search = new TextBox
+            {
+                Name="IfcElementSearch", Height=40, FontSize=14,
+                VerticalContentAlignment=VerticalAlignment.Center,
+                Padding=new Thickness(10,0,10,0), Margin=new Thickness(0,3,8,3),
+                ToolTip="Tìm theo tên, Element ID, IFC GUID hoặc hệ thống",
+                BorderBrush=Brush("#DCE4ED"), Background=Brush("#FFFFFF")
+            };
+            var searchLayout=new Grid();
+            searchLayout.Children.Add(search);
+            var placeholder=Text("Tìm kiếm phần tử IFC…",14,"#60738A");
+            placeholder.Margin=new Thickness(12,0,0,0);
+            placeholder.VerticalAlignment=VerticalAlignment.Center;
+            placeholder.IsHitTestVisible=false;
+            searchLayout.Children.Add(placeholder);
+            string filterMode="all";
+            string filterSystem=null;
+            Action applyFilter=()=>
+            {
+                string query=search.Text.Trim();
+                placeholder.Visibility=search.Text.Length==0 ? Visibility.Visible : Visibility.Collapsed;
+                sourceView.Filter=item=>
+                {
+                    var row=(AirTerminalRow)item;
+                    return (filterMode=="all" || (filterMode=="selected" ? row.IsSelected : !row.IsSelected))
+                        && (filterSystem==null || row.SystemType==filterSystem)
+                        && new[] { row.ElementId,row.Name,row.IfcGuid,row.SystemType,row.SystemName }
+                        .Any(value=>(value??"").IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0);
+                };
+                queueProperties();
+            };
+            search.TextChanged+=(s,e)=>applyFilter();
+            filter.Click+=(s,e)=>
+            {
+                var menu=new ContextMenu();
+                foreach(var option in new[] { new { Label="Tất cả",Mode="all" },new { Label="Đang tích chọn",Mode="selected" },new { Label="Chưa tích chọn",Mode="unselected" } })
+                {
+                    var item=new MenuItem { Header=option.Label,IsCheckable=true,IsChecked=filterMode==option.Mode && filterSystem==null };
+                    item.Click+=(a,b)=> { filterMode=option.Mode;filterSystem=null;filter.Content=option.Mode=="all"?"Filter":"Filter •";applyFilter(); };
+                    menu.Items.Add(item);
+                }
+                var systems=new MenuItem { Header="System Type" };
+                foreach(string system in propertyRows.Select(r=>r.SystemType).Where(v=>!string.IsNullOrEmpty(v)).Distinct().OrderBy(v=>v))
+                {
+                    var item=new MenuItem { Header=system,IsCheckable=true,IsChecked=filterSystem==system };
+                    item.Click+=(a,b)=> {filterMode="all";filterSystem=system;filter.Content="Filter •";applyFilter();};
+                    systems.Items.Add(item);
+                }
+                menu.Items.Add(systems);menu.PlacementTarget=filter;menu.IsOpen=true;
+            };
+            sort.Click+=(s,e)=>
+            {
+                var menu=new ContextMenu();
+                foreach(var field in new[] { new { Label="Element ID",Key="ElementId" },new { Label="Tên phần tử",Key="Name" },new { Label="System Type",Key="SystemType" },new { Label="System Name",Key="SystemName" } })
+                foreach(var direction in new[] { ListSortDirection.Ascending,ListSortDirection.Descending })
+                {
+                    var item=new MenuItem { Header=field.Label+(direction==ListSortDirection.Ascending?" ↑":" ↓") };
+                    item.Click+=(a,b)=> {sourceView.SortDescriptions.Clear();sourceView.SortDescriptions.Add(new SortDescription(field.Key,direction));};
+                    menu.Items.Add(item);
+                }
+                menu.PlacementTarget=sort;menu.IsOpen=true;
+            };
+            summary.Children.Add(searchLayout);
+            refreshProperties();
+            details.Children.Add(summary);
             if (!AirTerminalCount.HasValue)
             {
                 var error = Text(AirTerminalError ?? "Không đọc được số lượng. Hãy chạy lại tool.", 13, "#9A5B12");
@@ -493,6 +615,7 @@ namespace IFCInfo
             border.SetValue(Border.PaddingProperty, new TemplateBindingExtension(Control.PaddingProperty));
             var presenter = new FrameworkElementFactory(typeof(ContentPresenter));
             presenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            presenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
             border.AppendChild(presenter);
             var template = new ControlTemplate(typeof(Button)) { VisualTree = border };
             var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };

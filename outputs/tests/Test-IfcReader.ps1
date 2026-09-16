@@ -83,4 +83,12 @@ if ($CadMepFile) {
     }
     $ducts | Format-Table Name, WidthMm, HeightMm, LengthMm, GeometryError
 }
+foreach ($kind in @('IFCPIPESEGMENT','IFCCABLECARRIERSEGMENT')) {
+    $fixture=$sample.Replace('IFCDUCTSEGMENT(',"$kind(")
+    $product=(Read-Sample $fixture).Products['duct']
+    Assert (!$product.GeometryError -and $product.WidthMm -eq 200 -and $product.HeightMm -eq 100 -and $product.LengthMm -eq 1000) "$kind rectangular extrusion"
+    $fixture=$fixture.Replace('IFCRECTANGLEPROFILEDEF(.AREA.,$,$,200.,100.)','IFCCIRCLEPROFILEDEF(.AREA.,$,$,50.)')
+    $product=(Read-Sample $fixture).Products['duct']
+    Assert (!$product.GeometryError -and $product.DiameterMm -eq 100 -and $product.LengthMm -eq 1000) "$kind circular extrusion"
+}
 Write-Output "PASS: $script:checks assertions"

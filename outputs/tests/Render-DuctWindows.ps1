@@ -1,5 +1,5 @@
 param(
-    [string]$RevitApiDir = 'C:\Program Files\Autodesk\Revit 2024',
+    [string]$RevitApiDir = 'C:\Program Files\Autodesk\Revit 2023',
     [string]$OutputDirectory = (Join-Path $PSScriptRoot '../qa')
 )
 # Offscreen WPF layout check; no Revit model operations.

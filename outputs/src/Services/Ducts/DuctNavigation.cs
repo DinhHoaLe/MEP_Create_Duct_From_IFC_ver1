@@ -10,9 +10,9 @@ namespace IFCInfo
     {
         internal static void Execute(UIDocument ui, RevitLinkInstance link, AirTerminalRow row, string action)
         {
-            var source = link.GetLinkDocument()?.GetElement(new ElementId(long.Parse(row.ElementId)));
+            var source = link.GetLinkDocument()?.GetElement(ElementIds.Create(long.Parse(row.ElementId)));
             if (source == null) throw new InvalidOperationException("Không tìm thấy nguồn IFC.");
-            var ids = row.CorrespondingDuctIds.Select(id => new ElementId(id)).Where(id => ui.Document.GetElement(id) != null).ToList();
+            var ids = row.CorrespondingDuctIds.Select(id => ElementIds.Create(id)).Where(id => ui.Document.GetElement(id) != null).ToList();
             if (action == "Chọn duct tương ứng")
             {
                 if (ids.Count == 0) throw new InvalidOperationException("Chưa tìm thấy duct tương ứng.");
@@ -27,7 +27,7 @@ namespace IFCInfo
                     var family = new FilteredElementCollector(ui.Document).OfClass(typeof(ViewFamilyType)).Cast<ViewFamilyType>()
                         .First(v => v.ViewFamily == ViewFamily.ThreeDimensional);
                     view = View3D.CreateIsometric(ui.Document, family.Id);
-                    view.Name = "IFC kiểm tra " + DateTime.Now.ToString("yyyyMMdd HHmmss") + " " + view.Id.Value;
+                    view.Name = "IFC kiểm tra " + DateTime.Now.ToString("yyyyMMdd HHmmss") + " " + view.Id.Number();
                     var bb = source.get_BoundingBox(null);
                     if (bb == null) throw new InvalidOperationException("Nguồn không có bounding box.");
                     var transform = link.GetTotalTransform().Multiply(bb.Transform);

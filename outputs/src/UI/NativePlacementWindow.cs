@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -19,7 +19,7 @@ namespace IFCInfo
             List<ReplacementTypeOption> systems = null,long sourceCategoryId = 0,
             string sourceCategoryName = null, Func<string,long,List<ReplacementTypeOption>> loadFamily = null)
         {
-            Title = "Đặt phần tử native theo IFC · Revit 2024";
+            Title = "Đặt phần tử native theo IFC · Revit 2023";
             Width = 780;
             Height = 700;
             MinWidth = 580;
@@ -105,7 +105,7 @@ namespace IFCInfo
             body.Children.Add(angle);
             var notes = IFCInfoWindow.Text("Family điểm dùng điểm đặt nguồn hoặc tâm khung bao; góc xoay nhập thêm quanh Z/pháp tuyến host. " +
                 "Family cần host sẽ yêu cầu chọn mặt phẳng; Adaptive yêu cầu chọn các điểm điều khiển cho từng nguồn. Family theo đường có thể chọn 2 điểm nếu không đọc được đường nguồn.\n\n" +
-                "Duct dùng đường tim; chiều dài mới giữ đầu thứ nhất và đổi đầu còn lại. Duct Fitting dùng family cùng Category đã chọn.\n\n" +
+                "Duct / Pipe / Conduit / Cable Tray thẳng dùng đường tim và kích thước IFC. Chiều dài mới giữ đầu thứ nhất và đổi đầu còn lại. Hình học cong, rỗng hoặc phức tạp chưa đọc được sẽ báo lỗi; không tự đoán kích thước. Duct Fitting dùng family cùng Category đã chọn.\n\n" +
                 "Kết quả sau đặt có IFC Pset/Qto (nếu có), lưu kèm phần tử và có thể xuất CSV. Đây là dữ liệu nguồn, không tự biến thành shared parameter của Revit.", 13, "#526880");
             notes.Margin = new Thickness(0, 20, 0, 0);
             body.Children.Add(notes);

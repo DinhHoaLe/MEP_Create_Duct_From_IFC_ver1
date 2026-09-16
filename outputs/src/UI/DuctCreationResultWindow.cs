@@ -31,10 +31,6 @@ namespace IFCInfo
             var choose=IFCInfoWindow.Button("Chọn toàn bộ phần tử của lượt và đóng",false); buttons.Children.Add(choose); choose.IsEnabled=!rolledBack && rows.Any(r=>r.Success);
             choose.Click+=(s,e)=> { select(); Close(); };
             var close=IFCInfoWindow.Button("Đóng",true); buttons.Children.Add(close); close.Click+=(s,e)=>Close();
-            var psetPanel=new StackPanel { Margin=new Thickness(0,12,0,0) }; DockPanel.SetDock(psetPanel,Dock.Bottom); root.Children.Add(psetPanel);
-            psetPanel.Children.Add(IFCInfoWindow.Text("IFC Pset / Qto của dòng đang chọn",16,"#102A50"));
-            var psets=new TextBox { Text="Chọn một dòng để xem thuộc tính IFC nguồn.",IsReadOnly=true,AcceptsReturn=true,TextWrapping=TextWrapping.Wrap,
-                Height=160,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,Margin=new Thickness(0,6,0,0) }; psetPanel.Children.Add(psets);
             var grid=new DataGrid { ItemsSource=rows,AutoGenerateColumns=false,IsReadOnly=true,CanUserAddRows=false,Margin=new Thickness(0,14,0,0),MinRowHeight=34,ColumnHeaderHeight=36 };
             var textStyle=new Style(typeof(TextBlock));
             textStyle.Setters.Add(new Setter(TextBlock.TextWrappingProperty,TextWrapping.Wrap));
@@ -43,7 +39,6 @@ namespace IFCInfo
                 grid.Columns.Add(new DataGridTextColumn { Header=column[0],Binding=new System.Windows.Data.Binding(column[1]),ElementStyle=textStyle,
                     Width=column[1]=="Reason" ? new DataGridLength(1,DataGridLengthUnitType.Star) : new DataGridLength(column[1]=="IfcGuid" ? 200 : 130),MinWidth=90 });
             root.Children.Add(grid);
-            grid.SelectionChanged+=(s,e)=>psets.Text=(grid.SelectedItem as DuctRunRow)?.IfcPsets??"Không có IFC Pset trong dữ liệu của dòng này.";
             if (rows.Count>0) grid.SelectedIndex=0;
         }
     }

@@ -14,12 +14,12 @@ namespace IFCInfo
             window.LoadPlacementFamily = (path, sourceCategoryId) =>
             {
                 if (!SupportedCategories.Contains(sourceCategoryId))
-                    throw new InvalidOperationException("Tool chỉ hỗ trợ Ducts và Duct Fittings.");
+                    throw new InvalidOperationException("Category này chưa được hỗ trợ.");
                 DuctCreation.RunTransaction(doc, "IFC - Load placement family", () =>
                 {
                     if (!doc.LoadFamily(path, out Family loaded))
                         throw new InvalidOperationException("Không nạp được family. Family có thể đã tồn tại; hãy chọn type đã có hoặc chọn tệp .rfa khác.");
-                    if (sourceCategoryId == 0 || loaded.FamilyCategory?.Id.Value != sourceCategoryId)
+                    if (sourceCategoryId == 0 || loaded.FamilyCategory?.Id.Number() != sourceCategoryId)
                         throw new InvalidOperationException("Family đã chọn không cùng Category nguồn IFC. Đã hủy nạp family; hãy chọn family đúng Category.");
                 });
                 Configure(window, doc);
@@ -28,8 +28,8 @@ namespace IFCInfo
             var types=new List<ReplacementTypeOption>();
             foreach (ElementType type in new FilteredElementCollector(doc).WhereElementIsElementType().Cast<ElementType>())
             {
-                if (type.Category==null || !SupportedCategories.Contains(type.Category.Id.Value)) continue;
-                var option=new ReplacementTypeOption { Id=type.Id.Value,CategoryId=type.Category.Id.Value,CategoryName=type.Category.Name,
+                if (type.Category==null || !SupportedCategories.Contains(type.Category.Id.Number())) continue;
+                var option=new ReplacementTypeOption { Id=type.Id.Number(),CategoryId=type.Category.Id.Number(),CategoryName=type.Category.Name,
                     Label=type.FamilyName+" : "+type.Name,Kind="Unsupported",Placement="Category này cần cách dựng chuyên biệt chưa có trong bản này." };
                 if (type is FamilySymbol symbol)
                 {
@@ -62,16 +62,16 @@ namespace IFCInfo
                 }
                 types.Add(option);
             }
-            foreach (var category in new FilteredElementCollector(doc).WhereElementIsNotElementType().Where(e=>e.Category!=null && SupportedCategories.Contains(e.Category.Id.Value))
-                .Select(e=>e.Category).GroupBy(c=>c.Id.Value).Select(g=>g.First()))
-                if (!types.Any(t=>t.CategoryId==category.Id.Value)) types.Add(new ReplacementTypeOption { CategoryId=category.Id.Value,CategoryName=category.Name,
+            foreach (var category in new FilteredElementCollector(doc).WhereElementIsNotElementType().Where(e=>e.Category!=null && SupportedCategories.Contains(e.Category.Id.Number()))
+                .Select(e=>e.Category).GroupBy(c=>c.Id.Number()).Select(g=>g.First()))
+                if (!types.Any(t=>t.CategoryId==category.Id.Number())) types.Add(new ReplacementTypeOption { CategoryId=category.Id.Number(),CategoryName=category.Name,
                     Label="Không có type có thể đặt",Kind="Unsupported",Placement="Category hiện có phần tử nhưng không có type để đặt mới." });
             window.ReplacementTypes=types.OrderBy(t=>t.CategoryName).ThenBy(t=>t.Label).ToList();
             window.ReplacementLevels=new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().OrderBy(l=>l.ProjectElevation)
-                .Select(l=>new ReplacementLevelOption { Id=l.Id.Value,Label=l.Name }).ToList();
+                .Select(l=>new ReplacementLevelOption { Id=l.Id.Number(),Label=l.Name }).ToList();
             window.ReplacementSystems=new FilteredElementCollector(doc).OfClass(typeof(MEPSystemType)).Cast<MEPSystemType>()
-                .Where(t=>t is MechanicalSystemType)
-                .Select(t=>new ReplacementTypeOption { Id=t.Id.Value,Label=t.Name,Kind=t is PipingSystemType ? "Pipe" : "Duct" }).ToList();
+                .Where(t=>t is MechanicalSystemType || t is PipingSystemType)
+                .Select(t=>new ReplacementTypeOption { Id=t.Id.Number(),Label=t.Name,Kind=t is PipingSystemType ? "Pipe" : "Duct" }).ToList();
         }
     }
 }

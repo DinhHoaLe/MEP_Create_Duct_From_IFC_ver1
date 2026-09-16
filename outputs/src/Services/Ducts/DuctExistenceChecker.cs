@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
@@ -62,7 +62,7 @@ namespace IFCInfo
                 }
                 ducts.Add(new DuctCoverage.Segment
                 {
-                    Id = duct.Id.Value,
+                    Id = duct.Id.Number(),
                     Start = Coordinates(line.GetEndPoint(0)),
                     End = Coordinates(line.GetEndPoint(1)),
                     Width = Size(duct, BuiltInParameter.RBS_CURVE_WIDTH_PARAM),
@@ -70,7 +70,7 @@ namespace IFCInfo
                     Diameter = Size(duct, BuiltInParameter.RBS_CURVE_DIAMETER_PARAM),
                     WidthAxis = Coordinates(duct.ConnectorManager.Connectors.Cast<Connector>().First(c=>c.ConnectorType==ConnectorType.End).CoordinateSystem.BasisX),
                     UnsupportedShape = duct.DuctType.Shape != ConnectorProfileType.Round && duct.DuctType.Shape != ConnectorProfileType.Rectangular,
-                    SystemTypeId = duct.get_Parameter(BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM)?.AsElementId().Value ?? -1
+                    SystemTypeId = duct.get_Parameter(BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM)?.AsElementId().Number() ?? -1
                 });
             }
             Transform transform = link.GetTotalTransform();
@@ -78,14 +78,14 @@ namespace IFCInfo
             {
                 try
                 {
-                    Element source = link.GetLinkDocument()?.GetElement(new ElementId(long.Parse(row.ElementId)));
+                    Element source = link.GetLinkDocument()?.GetElement(ElementIds.Create(long.Parse(row.ElementId)));
                     if (source == null)
                         throw new InvalidOperationException("Không tìm thấy ống nguồn.");
                     var geometry = DuctGeometryReader.Read(source, row.DuctSource);
                     string key = link.UniqueId + "|" + (string.IsNullOrWhiteSpace(row.IfcGuid) ? source.UniqueId : row.IfcGuid) + "|" + (row.SystemType ?? "");
                     long? expectedSystem = null;
                     var configured = settings.Systems.FirstOrDefault(m => m.Key == DuctRequest.SystemKey(geometry.Round, row.SystemType));
-                    if (configured != null && systemTypes.Any(t => t.Id.Value == configured.Id)) expectedSystem = configured.Id;
+                    if (configured != null && systemTypes.Any(t => t.Id.Number() == configured.Id)) expectedSystem = configured.Id;
                     else if (savedMappings.TryGetValue(key, out var mappedIds))
                     {
                         if (mappedIds.Count == 1) expectedSystem = mappedIds.Single();
@@ -94,7 +94,7 @@ namespace IFCInfo
                     {
                         var namedTypes = systemTypes.Where(t => !string.IsNullOrWhiteSpace(row.SystemType) &&
                             string.Equals(t.Name.Trim(), row.SystemType.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
-                        if (namedTypes.Count == 1) expectedSystem = namedTypes[0].Id.Value;
+                        if (namedTypes.Count == 1) expectedSystem = namedTypes[0].Id.Number();
                     }
                     var result = DuctCoverage.CheckDetails(Coordinates(transform.OfPoint(geometry.Start)),
                         Coordinates(transform.OfPoint(geometry.End)), ducts, 1.0 / 304.8,

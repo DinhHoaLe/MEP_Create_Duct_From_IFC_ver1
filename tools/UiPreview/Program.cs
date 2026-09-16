@@ -23,6 +23,11 @@ internal static class Program
             {
                 TestSelection(false);
                 TestSelection(true);
+                TestResultSelection();
+                TestFamilyLoader();
+                TestProperties();
+                TestCheckedProperties();
+                TestNativeCurves();
                 Console.WriteLine("PASS: " + checks + " WPF regression checks.");
                 return 0;
             }
@@ -33,6 +38,21 @@ internal static class Program
             }
             string output = Path.GetFullPath(args[0]);
             Directory.CreateDirectory(output);
+            foreach(string kind in new[] { "Pipe","CableTray" })
+            {
+                long category=kind=="Pipe"?(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves:(long)Autodesk.Revit.DB.BuiltInCategory.OST_CableTray;
+                var curveWindow=new CurveCreationWindow(new List<AirTerminalRow> { new AirTerminalRow { ElementId="123",Name=kind+" IFC",SystemType="Supply",Elevation="3200" } },
+                    new List<ReplacementTypeOption> { new ReplacementTypeOption { Id=1,CategoryId=category,Kind=kind,Supported=true,Label=kind+" Type" } },
+                    new List<ReplacementLevelOption> { new ReplacementLevelOption { Id=2,Label="Level 1" } },
+                    new List<ReplacementTypeOption> { new ReplacementTypeOption { Id=3,Kind="Pipe",Label="Domestic Cold Water" } },category,kind);
+                Render(curveWindow,output,kind+"-step3.png",900,690); curveWindow.Close();
+            }
+            var propertyPanel=new IfcPropertiesPanel();
+            propertyPanel.ShowSource(new AirTerminalRow { ElementId="123",Name="Rectangular Duct",IfcGuid="ifc-source-guid",
+                SystemType="Supply Air",SystemName="SA-01",Elevation="3200",DataSource="Khớp IFC GUID; IFC gốc",
+                DuctSource=new IfcTerminalSource { WidthMm=500,HeightMm=250,LengthMm=2400 } });
+            var propertyWindow=new Window { Content=propertyPanel };
+            Render(propertyWindow,output,"ifc-properties.png",350,480); propertyWindow.Close();
             var items = new List<DuctPlanItem> { Item("123", false, "Supply Air", "Level 1") };
             var settings = Settings(items, false, Choices());
             Render(settings, output, "duct-settings.png", 900, 690);
@@ -46,7 +66,7 @@ internal static class Program
             };
             var resultType = typeof(IFCInfoWindow).Assembly.GetType("IFCInfo.DuctCreationResultWindow", true);
             var result = (Window)Activator.CreateInstance(resultType, BindingFlags.Instance | BindingFlags.NonPublic,
-                null, new object[] { rows, false, (Action)(() => { }) }, null);
+                null, new object[] { rows, false, (Action)(() => { }), "Kết quả kiểm tra" }, null);
             Render(result, output, "duct-results.png", 1050, 600);
             result.Close();
             Console.WriteLine("Rendered IFC/Duct settings and result windows: " + output);
@@ -76,6 +96,123 @@ internal static class Program
     {
         if (!condition) throw new InvalidOperationException(message);
         checks++;
+    }
+
+    private static void TestResultSelection()
+    {
+        var rows = new List<DuctRunRow> {
+            new DuctRunRow { Success=true, TargetId="10" },
+            new DuctRunRow { Success=true, TargetId="20" },
+            new DuctRunRow { Success=true, TargetId="10, 30" },
+            new DuctRunRow { Success=false, TargetId="40" },
+            new DuctRunRow { Success=true, TargetId="invalid,-1" }
+        };
+        Assert(DuctRunRow.SuccessfulTargetIds(rows).SequenceEqual(new long[] {10,20,30}), "Select committed targets, including fitting; deduplicate and exclude failed targets");
+        foreach (var row in rows) row.Success=false;
+        Assert(DuctRunRow.SuccessfulTargetIds(rows).Count==0, "Rollback must leave no selected targets");
+    }
+
+    private static void TestFamilyLoader()
+    {
+        var category=(long)Autodesk.Revit.DB.BuiltInCategory.OST_DuctFitting;
+        var window=new NativePlacementWindow(new List<AirTerminalRow> { new AirTerminalRow { ElementId="1" } },
+            new List<ReplacementTypeOption>(),new List<ReplacementLevelOption>(),null,category,"Duct Fittings",
+            (path,id)=>new List<ReplacementTypeOption>());
+        var nodes=Descendants(window).OfType<FrameworkElement>().ToList();
+        Assert(nodes.Single(n=>n.Name=="LoadPlacementFamily").Visibility==Visibility.Visible,"Missing fitting family must offer loading");
+        Assert(!((Button)nodes.Single(n=>n.Name=="CreateNative")).IsEnabled,"Missing type must not be submitted");
+        window.Close();
+    }
+
+    private static void TestNativeCurves()
+    {
+        foreach (var pair in new[] {
+            Tuple.Create("Pipe",(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves),
+            Tuple.Create("Conduit",(long)Autodesk.Revit.DB.BuiltInCategory.OST_Conduit),
+            Tuple.Create("CableTray",(long)Autodesk.Revit.DB.BuiltInCategory.OST_CableTray) })
+        {
+            var type=new ReplacementTypeOption { Id=10,CategoryId=(long)pair.Item2,CategoryName=pair.Item1,Kind=pair.Item1,Label="Test type",Supported=true };
+            var systems=new List<ReplacementTypeOption> { new ReplacementTypeOption { Id=20,Kind="Pipe",Label="Water" } };
+            var window=new NativePlacementWindow(new List<AirTerminalRow> { new AirTerminalRow { ElementId="1" } },
+                new List<ReplacementTypeOption> { type },new List<ReplacementLevelOption> { new ReplacementLevelOption { Id=1,Label="L1" } },
+                systems,(long)pair.Item2,pair.Item1);
+            var nodes=Descendants(window).OfType<FrameworkElement>().ToList();
+            Assert(((Button)nodes.Single(n=>n.Name=="CreateNative")).IsEnabled,"Valid native curve must be enabled: "+pair.Item1);
+            Assert(((ComboBox)nodes.Single(n=>n.Name=="TargetSystem")).IsEnabled==(pair.Item1=="Pipe"),"Only Pipe requires piping system");
+            window.Close();
+        }
+    }
+
+    private static void TestProperties()
+    {
+        var panel=new IfcPropertiesPanel();
+        var grid=Descendants(panel).OfType<DataGrid>().Single();
+        var row=new AirTerminalRow { ElementId="123",Name="Duct",IfcGuid="guid",IsSelected=false };
+        row.IfcProperties.Add(new IfcPropertyValue { Scope="Instance",SetName="Pset_Test",Name="Reference",Value="IFC value" });
+        panel.ShowSource(row);
+        Assert(grid.Items.Cast<KeyValuePair<string,string>>().Any(p=>p.Value=="IFC value"),"Properties must display selected source Pset");
+        Assert(!row.IsSelected,"Inspecting properties must not select duct for creation");
+        var other=new AirTerminalRow { ElementId="456",Name="Duct" };
+        other.IfcProperties.Add(new IfcPropertyValue { Scope="Instance",SetName="Pset_Test",Name="Reference",Value="IFC value" });
+        panel.ShowSources(new[] { row,other });
+        var combined=grid.Items.Cast<KeyValuePair<string,string>>().ToDictionary(p=>p.Key,p=>p.Value);
+        Assert(combined["Instance / Pset_Test / Reference"]=="IFC value","Equal parameters must display one value");
+        Assert(combined["Element ID trong link"]=="<varies>","Different IDs must display varies");
+        other.IfcProperties[0].Value="different";
+        panel.ShowSources(new[] { row,other });
+        Assert(grid.Items.Cast<KeyValuePair<string,string>>().Single(p=>p.Key=="Instance / Pset_Test / Reference").Value=="<varies>","Different parameter values must display varies");
+        other.IfcProperties.Clear();
+        panel.ShowSources(new[] { row,other });
+        Assert(grid.Items.Cast<KeyValuePair<string,string>>().Single(p=>p.Key=="Instance / Pset_Test / Reference").Value=="<varies>","Missing parameter on one source must display varies");
+        panel.ShowSource(row);
+        Assert(grid.Items.Cast<KeyValuePair<string,string>>().Single(p=>p.Key=="Instance / Pset_Test / Reference").Value=="IFC value","Single selection must restore original value");
+        panel.ShowSource(new AirTerminalRow { ElementId="456" });
+        Assert(!grid.Items.Cast<KeyValuePair<string,string>>().Any(p=>p.Value=="IFC value"),"Changing row must clear previous IFC properties");
+        panel.ShowSource(null);
+        Assert(grid.Items.Count==0,"Clearing active row must clear properties");
+    }
+
+    private static void TestCheckedProperties()
+    {
+        var main=new IFCInfoWindow();
+        var first=new AirTerminalRow { ElementId="1",SystemType="Supply",SystemName="A" };
+        var second=new AirTerminalRow { ElementId="2",SystemType="Supply",SystemName="B" };
+        main.AirTerminals=new List<AirTerminalRow> { first,second };
+        main.AirTerminalCount=2;
+        typeof(IFCInfoWindow).GetProperty("SelectedCategory").GetSetMethod(true).Invoke(main,new object[] {
+            new CategoryOption { Id=(long)Autodesk.Revit.DB.BuiltInCategory.OST_DuctCurves,Name="Ducts" } });
+        var page=(FrameworkElement)typeof(IFCInfoWindow).GetMethod("CountPage",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(main,null);
+        var grids=Descendants(page).OfType<DataGrid>().ToList();
+        var sourceGrid=grids.Single(g=>g.Name!="IfcPropertyValues");
+        var values=grids.Single(g=>g.Name=="IfcPropertyValues");
+        Action flush=()=>page.Dispatcher.Invoke(new Action(()=>{}),DispatcherPriority.ContextIdle);
+        Func<string,string> value=key=>values.Items.Cast<KeyValuePair<string,string>>().Single(p=>p.Key==key).Value;
+        sourceGrid.SelectedItem=second;
+        first.IsSelected=true; second.IsSelected=true; flush();
+        Assert(value("System Name")=="<varies>","Two checked sources must override last clicked row");
+        Assert(value("System Type")=="Supply","Checked sources must retain common values");
+        second.IsSelected=false; flush();
+        Assert(value("System Name")=="A","Unchecking must update properties immediately");
+        first.IsSelected=false; flush();
+        Assert(value("System Name")=="B","With no checks properties must follow highlighted row");
+        sourceGrid.SelectedItems.Add(first); flush();
+        Assert(value("System Name")=="<varies>","Multiple highlighted rows must still aggregate without checks");
+        var total=Descendants(page).OfType<TextBlock>().Single(t=>t.Name=="IfcSelectionTotal");
+        Assert(total.Text=="Total: 0 / 2","Totals count checked elements, not row focus");
+        first.IsSelected=true; second.IsSelected=true; flush();
+        Assert(total.Text=="Total: 2 / 2","Totals update for checked sources");
+        var search=Descendants(page).OfType<TextBox>().Single(t=>t.Name=="IfcElementSearch");
+        search.Text="2"; flush();
+        Assert(sourceGrid.Items.Count==1 && sourceGrid.Items[0]==second,"Search finds linked element by ID");
+        Assert(total.Text=="Total: 2 / 2" && first.IsSelected,"Search preserves hidden selections and totals");
+        search.Text="does not exist"; flush();
+        Assert(sourceGrid.Items.Count==0,"Unmatched search returns no rows");
+        search.Text=""; flush();
+        Assert(sourceGrid.Items.Count==2,"Clearing search restores rows");
+        var propertyPanel=Descendants(page).OfType<IfcPropertiesPanel>().Single();
+        Assert(propertyPanel.AllPropertyValues().Contains("System Name\t<varies>"),"Copy includes aggregated property values");
+        page.RaiseEvent(new RoutedEventArgs(FrameworkElement.UnloadedEvent));
+        main.Close();
     }
 
     private static void TestSelection(bool updating)

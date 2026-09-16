@@ -49,7 +49,7 @@ namespace IFCInfo
                             long id=0;
                             RunTransaction(doc,"IFC - "+item.Source.ElementId,()=>
                             {
-                                var duct=CreateOrUpdate(doc,item,request); DuctRevision.Save(duct,item,run); id=duct.Id.Value;
+                                var duct=CreateOrUpdate(doc,item,request); DuctRevision.Save(duct,item,run); id=duct.Id.Number();
                             });
                             existing.Add(item.Key); successful[id]=item; row.TargetId=id.ToString(); row.Success=true;
                             row.Status=item.ExistingId>0 ? "Đã cập nhật" : "Đã tạo";
@@ -63,7 +63,7 @@ namespace IFCInfo
                         {
                             RunTransaction(doc,"IFC - Save revision",()=>
                             {
-                                foreach (var pair in successful) DuctRevision.Save((Duct)doc.GetElement(new ElementId(pair.Key)),pair.Value,run);
+                                foreach (var pair in successful) DuctRevision.Save((Duct)doc.GetElement(ElementIds.Create(pair.Key)),pair.Value,run);
                             });
                         }
                         catch (Exception ex)
@@ -89,7 +89,9 @@ namespace IFCInfo
             foreach (var item in request.Items.Where(i=>!rows.Any(r=>r.SourceId==i.Source.ElementId)))
                 rows.Add(new DuctRunRow { SourceId=item.Source.ElementId,IfcGuid=item.Source.IfcGuid,Status="Chưa thực hiện",Reason="Lượt đã dừng và hoàn tác." });
             foreach (var row in rows) row.RunId=run;
-            var ids=successful.Keys.Select(id=>new ElementId(id)).ToList(); ui.Selection.SetElementIds(ids);
+            var ids=DuctRunRow.SuccessfulTargetIds(rows).Select(id=>ElementIds.Create(id))
+                .Where(id => { var e=doc.GetElement(id); return e is Duct || e?.Category?.Id.Number()==(long)BuiltInCategory.OST_DuctFitting; }).ToList();
+            ui.Selection.SetElementIds(ids);
             var result=new DuctCreationResultWindow(rows,rolledBack,()=>ui.Selection.SetElementIds(ids));
             new System.Windows.Interop.WindowInteropHelper(result).Owner=ui.Application.MainWindowHandle; result.ShowDialog();
         }
@@ -105,24 +107,24 @@ namespace IFCInfo
         }
         private static Duct CreateOrUpdate(Document doc,DuctPlanItem item,DuctRequest request)
         {
-            var others=new FilteredElementCollector(doc).OfClass(typeof(Duct)).Cast<Duct>().Where(d=>d.Id.Value!=item.ExistingId)
+            var others=new FilteredElementCollector(doc).OfClass(typeof(Duct)).Cast<Duct>().Where(d=>d.Id.Number()!=item.ExistingId)
                 .Select(d=>new { Duct=d,Line=(d.Location as LocationCurve)?.Curve as Line }).Where(d=>d.Line!=null)
-                .Select(d=>new DuctCoverage.Segment { Id=d.Duct.Id.Value,
+                .Select(d=>new DuctCoverage.Segment { Id=d.Duct.Id.Number(),
                     Start=new[] { d.Line.GetEndPoint(0).X,d.Line.GetEndPoint(0).Y,d.Line.GetEndPoint(0).Z },
                     End=new[] { d.Line.GetEndPoint(1).X,d.Line.GetEndPoint(1).Y,d.Line.GetEndPoint(1).Z } });
             var overlap=DuctCoverage.Check(new[] { item.Start.X,item.Start.Y,item.Start.Z },new[] { item.End.X,item.End.Y,item.End.Z },others,1.0/304.8);
             if (overlap.Ids.Count>0) throw new InvalidOperationException("Đường tim chồng duct ID "+string.Join(",",overlap.Ids)+"; không tạo/cập nhật chồng ống.");
             string key=DuctRequest.SystemKey(item.Round,item.Source.SystemType);
-            var system=new ElementId(request.SystemTypes[key]); var type=new ElementId(item.Round?request.RoundTypeId:request.RectangularTypeId);
+            var system=ElementIds.Create(request.SystemTypes[key]); var type=ElementIds.Create(item.Round?request.RoundTypeId:request.RectangularTypeId);
             var levels=new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().OrderBy(l=>l.ProjectElevation).ToList();
             long mapped;
-            var level=request.Levels.TryGetValue(item.LevelKey??"Không có Level nguồn",out mapped) && mapped>0 ? doc.GetElement(new ElementId(mapped)) as Level
+            var level=request.Levels.TryGetValue(item.LevelKey??"Không có Level nguồn",out mapped) && mapped>0 ? doc.GetElement(ElementIds.Create(mapped)) as Level
                 : levels.LastOrDefault(l=>l.ProjectElevation<=Math.Min(item.Start.Z,item.End.Z)+Tolerance)??levels.FirstOrDefault();
             if (level==null) throw new InvalidOperationException("Level đích không tồn tại.");
             Duct duct;
             if (item.ExistingId>0)
             {
-                duct=doc.GetElement(new ElementId(item.ExistingId)) as Duct;
+                duct=doc.GetElement(ElementIds.Create(item.ExistingId)) as Duct;
                 if (duct==null) throw new InvalidOperationException("Duct cần cập nhật đã bị xóa.");
                 if (!DuctRevision.Equal(DuctRevision.Get(duct,"Actual"),DuctRevision.Actual(duct))) throw new InvalidOperationException("Duct đã sửa trong Revit; không ghi đè.");
                 if (duct.Pinned || DuctRevision.Connected(duct)) throw new InvalidOperationException("Duct đang ghim hoặc nối mạng; không cập nhật tự động.");
@@ -158,7 +160,7 @@ namespace IFCInfo
                 !DuctGeometryReader.Near(duct.get_Parameter(BuiltInParameter.RBS_CURVE_WIDTH_PARAM).AsDouble(),item.Width) ||
                 !DuctGeometryReader.Near(duct.get_Parameter(BuiltInParameter.RBS_CURVE_HEIGHT_PARAM).AsDouble(),item.Height))
                 throw new InvalidOperationException("Kích thước sau regenerate không khớp IFC.");
-            RecordSource(duct,item.Key,item.Source,system.Value);
+            RecordSource(duct,item.Key,item.Source,system.Number());
             IfcPropertyStorage.Save(duct,item.Source);
             var comments=duct.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
             if (comments!=null && !comments.IsReadOnly) comments.Set("IFC GUID: "+item.Source.IfcGuid+" | System Name: "+item.Source.SystemName+" | System Type: "+item.Source.SystemType);

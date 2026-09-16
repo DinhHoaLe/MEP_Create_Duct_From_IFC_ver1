@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
@@ -32,7 +32,7 @@ namespace IFCInfo
                 string sourcePath = string.IsNullOrWhiteSpace(original) ? path : original.Trim();
                 if (sourcePath.EndsWith(".ifc.rvt", StringComparison.OrdinalIgnoreCase))
                     sourcePath = sourcePath.Substring(0, sourcePath.Length - 4);
-                result.Add(new LinkOption { Id = link.Id.Value, Name = type.Name, IfcPath = sourcePath, IsLoaded = linkedDoc != null });
+                result.Add(new LinkOption { Id = link.Id.Number(), Name = type.Name, IfcPath = sourcePath, IsLoaded = linkedDoc != null });
             }
             foreach (var group in result.GroupBy(l => l.Name).Where(g => g.Count() > 1))
             {

@@ -5,7 +5,7 @@
     <UseWPF>true</UseWPF>
     <LangVersion>latest</LangVersion>
     <PlatformTarget>x64</PlatformTarget>
-    <RevitApiDir Condition="'$(RevitApiDir)' == ''">C:\Program Files\Autodesk\Revit 2024</RevitApiDir>
+    <RevitApiDir Condition="'$(RevitApiDir)' == ''">C:\Program Files\Autodesk\Revit 2023</RevitApiDir>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\outputs\IFCInfo.csproj" />

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
@@ -19,8 +19,8 @@ namespace IFCInfo
                 return;
             using (var collector = new FilteredElementCollector(linkedDoc))
                 window.Categories = collector.WhereElementIsNotElementType().ToElements()
-                    .Where(element => element.Category != null && SupportedCategories.Contains(element.Category.Id.Value))
-                    .GroupBy(element => element.Category.Id.Value)
+                    .Where(element => element.Category != null && SupportedCategories.Contains(element.Category.Id.Number()))
+                    .GroupBy(element => element.Category.Id.Number())
                     .Select(group => new CategoryOption { Id = group.Key, Name = group.First().Category.Name })
                     .OrderBy(category => category.Name).ToList();
             window.LoadCategory = category => SetCategoryCount(window, linkedDoc, linkOption, category);
@@ -35,7 +35,7 @@ namespace IFCInfo
             window.CanReplaceCategory = category != null && SupportedCategories.Contains(category.Id);
             window.CanCreateDucts = false;
             if (!window.CanReplaceCategory)
-                throw new InvalidOperationException("Tool chỉ hỗ trợ Ducts và Duct Fittings.");
+                throw new InvalidOperationException("Category này chưa được hỗ trợ.");
             bool isDuct = category.Id == (long)BuiltInCategory.OST_DuctCurves;
             window.CanCreateDucts = isDuct;
             bool readIfc = window.CanReplaceCategory || isDuct;
@@ -76,7 +76,7 @@ namespace IFCInfo
                 using (var collector = new FilteredElementCollector(linkedDoc))
                 {
                     var terminals = collector
-                        .OfCategoryId(new ElementId(category.Id))
+                        .OfCategoryId(ElementIds.Create(category.Id))
                         .WhereElementIsNotElementType()
                         .ToElements();
                     window.AirTerminalCount = terminals.Count;
@@ -89,7 +89,8 @@ namespace IFCInfo
                             ElementId = element.Id.ToString(),
                             Name = element.Name,
                             IfcGuid = guid,
-                            SystemType = ReadSystemValue(element, BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM, "System Type"),
+                            SystemType = ReadSystemValue(element, category.Id==(long)BuiltInCategory.OST_PipeCurves
+                                ? BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM : BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM, "System Type"),
                             SystemName = ReadSystemValue(element, BuiltInParameter.RBS_SYSTEM_NAME_PARAM, "System Name"),
                             Elevation = "Không có thông tin",
                             DataSource = ifc == null ? "Parameter Revit" : "Chưa khớp IFC GUID; parameter Revit"

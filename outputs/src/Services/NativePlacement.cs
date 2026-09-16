@@ -19,18 +19,20 @@ namespace IFCInfo
         {
             var request=window.Replacement; if (request==null) return;
             if (!SupportedCategories.Contains(request.SourceCategoryId))
-                throw new InvalidOperationException("Tool chỉ hỗ trợ Ducts và Duct Fittings.");
+                throw new InvalidOperationException("Category này chưa được hỗ trợ.");
             var doc=ui.Document; var linked=link.GetLinkDocument();
             if (linked==null || doc.IsReadOnly || doc.IsFamilyDocument) throw new InvalidOperationException("Cần project có thể sửa và link đã load.");
-            var type=doc.GetElement(new ElementId(request.TypeId)) as ElementType;
-            var level=doc.GetElement(new ElementId(request.LevelId)) as Level;
+            var type=doc.GetElement(ElementIds.Create(request.TypeId)) as ElementType;
+            var level=doc.GetElement(ElementIds.Create(request.LevelId)) as Level;
             if (type==null || level==null) throw new InvalidOperationException("Type/Level không còn tồn tại.");
-            if (request.SourceCategoryId == 0 || type.Category?.Id.Value != request.SourceCategoryId)
+            if (type is PipeType && !(doc.GetElement(ElementIds.Create(request.SystemTypeId)) is PipingSystemType))
+                throw new InvalidOperationException("Chọn Piping System Type hợp lệ để tạo Pipe.");
+            if (request.SourceCategoryId == 0 || type.Category?.Id.Number() != request.SourceCategoryId)
                 throw new InvalidOperationException("Category của Type đích phải trùng Category nguồn IFC.");
             foreach (string sourceId in request.SourceIds)
             {
-                var sourceElement=linked.GetElement(new ElementId(long.Parse(sourceId)));
-                if (sourceElement?.Category?.Id.Value != request.SourceCategoryId)
+                var sourceElement=linked.GetElement(ElementIds.Create(long.Parse(sourceId)));
+                if (sourceElement?.Category?.Id.Number() != request.SourceCategoryId)
                     throw new InvalidOperationException("Nguồn " + sourceId + " không còn tồn tại hoặc khác Category đã chọn. Hãy đọc lại IFC link.");
             }
             var symbol=type as FamilySymbol;
@@ -60,7 +62,8 @@ namespace IFCInfo
                         var report=new DuctRunRow { RunId=run,SourceId=id,IfcGuid=row.IfcGuid,IfcPsets=IfcPropertyStorage.Text(row) }; reports.Add(report);
                         try
                         {
-                            var source=linked.GetElement(new ElementId(long.Parse(id)));
+                            if(request.SystemTypes.TryGetValue(row.SystemType??"",out long mappedSystem)) request.SystemTypeId=mappedSystem;
+                            var source=linked.GetElement(ElementIds.Create(long.Parse(id)));
                             if (source==null) throw new InvalidOperationException("Không tìm thấy nguồn.");
                             string key=link.UniqueId+"|"+(string.IsNullOrWhiteSpace(row.IfcGuid)?source.UniqueId:row.IfcGuid);
                             if (existing.Contains(key)) { report.Status="Bỏ qua"; report.Reason="Nguồn đã được tool tạo trước đó."; continue; }
@@ -101,7 +104,7 @@ namespace IFCInfo
                                     DuctRevision.Save(duct,snapshot,run);
                                 }
                             });
-                            existing.Add(key); created.Add(placed.Id); report.TargetId=placed.Id.Value.ToString(); report.Success=true; report.Status="Đã đặt";
+                            existing.Add(key); created.Add(placed.Id); report.TargetId=placed.Id.Number().ToString(); report.Success=true; report.Status="Đã đặt";
                             report.Reason=request.Kind+" · "+type.Name+(symbol!=null ? " · Family dùng kích thước Type đã chọn; Pset là dữ liệu nguồn." : " · Native theo hình học nguồn.");
                             if (adaptivePoints.Count>0) report.Reason+=" Điểm điều khiển do người dùng chọn trong Revit.";
                         }
@@ -139,7 +142,7 @@ namespace IFCInfo
             if (path.Start.DistanceTo(path.End)<Math.Max(doc.Application.ShortCurveTolerance,1.0/120)) throw new InvalidOperationException("Tuyến quá ngắn.");
             var existing=new FilteredElementCollector(doc).OfClass(typeof(MEPCurve)).Cast<MEPCurve>()
                 .Where(c=>c.Category?.Id==type.Category.Id).Select(c=>new { Curve=c,Line=(c.Location as LocationCurve)?.Curve as Line })
-                .Where(c=>c.Line!=null).Select(c=>new DuctCoverage.Segment { Id=c.Curve.Id.Value,
+                .Where(c=>c.Line!=null).Select(c=>new DuctCoverage.Segment { Id=c.Curve.Id.Number(),
                     Start=new[] { c.Line.GetEndPoint(0).X,c.Line.GetEndPoint(0).Y,c.Line.GetEndPoint(0).Z },End=new[] { c.Line.GetEndPoint(1).X,c.Line.GetEndPoint(1).Y,c.Line.GetEndPoint(1).Z } });
             var overlap=DuctCoverage.Check(new[] { path.Start.X,path.Start.Y,path.Start.Z },new[] { path.End.X,path.End.Y,path.End.Z },existing,1.0/304.8);
             if (overlap.Ids.Count>0) throw new InvalidOperationException("Đường tim chồng phần tử cùng category: "+string.Join(",",overlap.Ids));
@@ -149,10 +152,10 @@ namespace IFCInfo
                 case "Duct":
                     var ductType=(DuctType)type;
                     if (ductType.Shape!=(path.Round?ConnectorProfileType.Round:ConnectorProfileType.Rectangular)) throw new InvalidOperationException("Tiết diện Duct Type không khớp nguồn.");
-                    curve=Duct.Create(doc,new ElementId(request.SystemTypeId),type.Id,level.Id,path.Start,path.End); break;
+                    curve=Duct.Create(doc,ElementIds.Create(request.SystemTypeId),type.Id,level.Id,path.Start,path.End); break;
                 case "Pipe":
                     if (!path.Round) throw new InvalidOperationException("Pipe cần tiết diện tròn.");
-                    curve=Pipe.Create(doc,new ElementId(request.SystemTypeId),type.Id,level.Id,path.Start,path.End); break;
+                    curve=Pipe.Create(doc,ElementIds.Create(request.SystemTypeId),type.Id,level.Id,path.Start,path.End); break;
                 case "Conduit":
                     if (!path.Round) throw new InvalidOperationException("Conduit cần tiết diện tròn.");
                     curve=Conduit.Create(doc,type.Id,path.Start,path.End,level.Id); break;
@@ -181,6 +184,8 @@ namespace IFCInfo
                 Math.Abs(connector.CoordinateSystem.BasisX.DotProduct(path.WidthAxis))<1-1e-6)
                 throw new InvalidOperationException("Kích thước/hướng tiết diện native không khớp sau khi tạo.");
             if (curve.GetTypeId()!=type.Id) throw new InvalidOperationException("Type native không khớp lựa chọn.");
+            if (curve is Pipe && curve.get_Parameter(BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM)?.AsElementId()!=ElementIds.Create(request.SystemTypeId))
+                throw new InvalidOperationException("System Type của Pipe không khớp lựa chọn.");
             return curve;
         }
         private static FamilyInstance CreateFamily(Document doc,Element source,Transform transform,AirTerminalRow row,FamilySymbol symbol,Level level,ReplacementRequest request,
@@ -205,8 +210,8 @@ namespace IFCInfo
             var point=transform.OfPoint(local);
             double angle=request.RotationDegrees*Math.PI/180;
             FamilyInstance instance;
-            var structure=symbol.Category.Id.Value==(long)BuiltInCategory.OST_StructuralFraming ? StructuralType.Beam :
-                symbol.Category.Id.Value==(long)BuiltInCategory.OST_StructuralColumns ? StructuralType.Column : StructuralType.NonStructural;
+            var structure=symbol.Category.Id.Number()==(long)BuiltInCategory.OST_StructuralFraming ? StructuralType.Beam :
+                symbol.Category.Id.Number()==(long)BuiltInCategory.OST_StructuralColumns ? StructuralType.Column : StructuralType.NonStructural;
             if (placement==FamilyPlacementType.CurveBased || placement==FamilyPlacementType.CurveDrivenStructural)
             {
                 if (adaptivePoints.Count==2) return doc.Create.NewFamilyInstance(Line.CreateBound(adaptivePoints[0],adaptivePoints[1]),symbol,level,structure);
@@ -229,7 +234,7 @@ namespace IFCInfo
             doc.Regenerate();
             if (placement==FamilyPlacementType.TwoLevelsBased)
             {
-                var top=doc.GetElement(new ElementId(request.TopLevelId)) as Level;
+                var top=doc.GetElement(ElementIds.Create(request.TopLevelId)) as Level;
                 if (top==null || top.ProjectElevation<=point.Z) throw new InvalidOperationException("Level trên phải cao hơn điểm đặt.");
                 SetId(instance,BuiltInParameter.FAMILY_BASE_LEVEL_PARAM,level.Id); SetId(instance,BuiltInParameter.FAMILY_TOP_LEVEL_PARAM,top.Id);
                 SetDouble(instance,BuiltInParameter.FAMILY_BASE_LEVEL_OFFSET_PARAM,point.Z-level.ProjectElevation);

@@ -16,6 +16,14 @@ namespace IFCInfo
         public string Reason { get; set; }
         public string IfcPsets { get; set; }
         public bool Success { get; set; }
+        public static List<long> SuccessfulTargetIds(IEnumerable<DuctRunRow> rows)
+        {
+            var ids = new HashSet<long>();
+            foreach (var row in rows.Where(r => r.Success))
+                foreach (string token in (row.TargetId ?? "").Split(','))
+                    if (long.TryParse(token.Trim(), out long id) && id > 0) ids.Add(id);
+            return ids.OrderBy(id => id).ToList();
+        }
         public static string CsvCell(string value)
         {
             value = value ?? "";

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
@@ -31,10 +31,10 @@ namespace IFCInfo
                 {
                     try
                     {
-                        Element source = link.GetLinkDocument()?.GetElement(new ElementId(long.Parse(row.ElementId)));
+                        Element source = link.GetLinkDocument()?.GetElement(ElementIds.Create(long.Parse(row.ElementId)));
                         if (source == null)
                             throw new InvalidOperationException("Không tìm thấy phần tử nguồn.");
-                        if (source.Category?.Id.Value != (long)BuiltInCategory.OST_DuctCurves)
+                        if (source.Category?.Id.Number() != (long)BuiltInCategory.OST_DuctCurves)
                             throw new InvalidOperationException("Chỉ tạo Duct từ Category Ducts của IFC.");
                         string key = link.UniqueId + "|" + (string.IsNullOrWhiteSpace(row.IfcGuid) ? source.UniqueId : row.IfcGuid);
                         if (!updating && existing.Contains(key))
@@ -58,11 +58,11 @@ namespace IFCInfo
                             if (DuctRevision.Get(target, "Actual") == null)
                                 throw new InvalidOperationException("Duct cũ chưa có trạng thái gốc để kiểm tra sửa tay; bỏ qua cập nhật.");
                             if (!DuctRevision.Equal(DuctRevision.Get(target, "Actual"), DuctRevision.Actual(target)))
-                                throw new InvalidOperationException("Duct ID " + target.Id.Value + " đã sửa trong Revit; giữ nguyên để kiểm tra thủ công.");
+                                throw new InvalidOperationException("Duct ID " + target.Id.Number() + " đã sửa trong Revit; giữ nguyên để kiểm tra thủ công.");
                             if (DuctRevision.Equal(DuctRevision.Get(target, "Source"), DuctRevision.Source(item))) continue;
                             if (DuctRevision.Connected(target))
-                                throw new InvalidOperationException("Duct ID " + target.Id.Value + " đang nối mạng; cần xử lý kết nối trước khi cập nhật.");
-                            item.ExistingId = target.Id.Value;
+                                throw new InvalidOperationException("Duct ID " + target.Id.Number() + " đang nối mạng; cần xử lý kết nối trước khi cập nhật.");
+                            item.ExistingId = target.Id.Number();
                             item.ChangeSummary = DuctSnapshotComparison.Describe(DuctRevision.Get(target,"Source"),DuctRevision.Source(item));
                         }
                         if (item.Start.DistanceTo(item.End) < Math.Max(doc.Application.ShortCurveTolerance, 1.0 / 120))
@@ -73,12 +73,12 @@ namespace IFCInfo
                 }
                 var types = new FilteredElementCollector(doc).OfClass(typeof(DuctType)).Cast<DuctType>().ToList();
                 var systems = new FilteredElementCollector(doc).OfClass(typeof(MechanicalSystemType)).Cast<MechanicalSystemType>()
-                    .OrderBy(t => t.Name).Select(t => new DuctChoice { Id = t.Id.Value, Name = t.Name }).ToList();
+                    .OrderBy(t => t.Name).Select(t => new DuctChoice { Id = t.Id.Number(), Name = t.Name }).ToList();
                 var dialog = new DuctCreationWindow(items, issues,
-                    types.Where(t => t.Shape == ConnectorProfileType.Round).Select(t => new DuctChoice { Id = t.Id.Value, Name = t.Name }).ToList(),
-                    types.Where(t => t.Shape == ConnectorProfileType.Rectangular).Select(t => new DuctChoice { Id = t.Id.Value, Name = t.Name }).ToList(), systems,
+                    types.Where(t => t.Shape == ConnectorProfileType.Round).Select(t => new DuctChoice { Id = t.Id.Number(), Name = t.Name }).ToList(),
+                    types.Where(t => t.Shape == ConnectorProfileType.Rectangular).Select(t => new DuctChoice { Id = t.Id.Number(), Name = t.Name }).ToList(), systems,
                     new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().OrderBy(l=>l.ProjectElevation)
-                        .Select(l=>new DuctChoice { Id=l.Id.Value, Name=l.Name }).ToList(),
+                        .Select(l=>new DuctChoice { Id=l.Id.Number(), Name=l.Name }).ToList(),
                     doc.IsWorkshared ? new FilteredWorksetCollector(doc).OfKind(WorksetKind.UserWorkset)
                         .Select(w=>new DuctChoice { Id=w.Id.IntegerValue, Name=w.Name }).ToList() : new List<DuctChoice>(),
                     DuctProjectSettings.Load(doc), updating);

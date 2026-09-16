@@ -12,6 +12,7 @@ namespace IFCInfo
         public List<string> SourceIds { get; set; }
         public string Kind { get; set; } = "Family";
         public long SystemTypeId { get; set; }
+        public Dictionary<string,long> SystemTypes { get; set; } = new Dictionary<string,long>();
         public bool KeepSuccessful { get; set; }
         public double LengthMm { get; set; }
         public long TopLevelId { get; set; }

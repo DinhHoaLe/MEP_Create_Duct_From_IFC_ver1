@@ -14,7 +14,7 @@ namespace IFCInfo
             public long Owner; public int Port; public XYZ Point;
             public Connector Get(Document doc)
             {
-                var element=doc.GetElement(new ElementId(Owner));
+                var element=doc.GetElement(ElementIds.Create(Owner));
                 var manager=(element as Duct)?.ConnectorManager ?? (element as FamilyInstance)?.MEPModel?.ConnectorManager;
                 return manager?.Connectors.Cast<Connector>().FirstOrDefault(c=>c.Id==Port);
             }
@@ -24,7 +24,7 @@ namespace IFCInfo
             var manager=(e as Duct)?.ConnectorManager ?? (e as FamilyInstance)?.MEPModel?.ConnectorManager;
             return manager==null ? new List<End>() : manager.Connectors.Cast<Connector>()
                 .Where(c=>c.Domain==Domain.DomainHvac && c.ConnectorType==ConnectorType.End && !c.IsConnected)
-                .Select(c=>new End { Owner=e.Id.Value,Port=c.Id,Point=c.Origin }).ToList();
+                .Select(c=>new End { Owner=e.Id.Number(),Port=c.Id,Point=c.Origin }).ToList();
         }
         private static bool SameSize(Connector a,Connector b) => a.Shape==b.Shape &&
             (a.Shape==ConnectorProfileType.Round ? Math.Abs(a.Radius-b.Radius)<Tolerance/2 :
@@ -39,7 +39,7 @@ namespace IFCInfo
         }
         internal static void Execute(Document doc,List<long> ids,DuctRequest request,List<DuctRunRow> rows,string run)
         {
-            var ends=ids.SelectMany(id=>Ends(doc.GetElement(new ElementId(id)))).ToList();
+            var ends=ids.SelectMany(id=>Ends(doc.GetElement(ElementIds.Create(id)))).ToList();
             if (request.CreateFittings)
             {
                 var visited=new HashSet<End>();
@@ -57,9 +57,9 @@ namespace IFCInfo
                             throw new InvalidOperationException("Nút nối không duy nhất; bỏ qua để kiểm tra thủ công.");
                         var ports=cluster.Select(e=>e.Get(doc)).ToList();
                         if (ports.Any(c=>c==null || c.IsConnected)) throw new InvalidOperationException("Connector đã thay đổi hoặc đã nối.");
-                        if (cluster.Select(e=>doc.GetElement(new ElementId(e.Owner)).get_Parameter(BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM)?.AsElementId().Value).Distinct().Count()!=1)
+                        if (cluster.Select(e=>doc.GetElement(ElementIds.Create(e.Owner)).get_Parameter(BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM)?.AsElementId().Number()).Distinct().Count()!=1)
                             throw new InvalidOperationException("Các duct khác System Type; không nối tự động.");
-                        if (cluster.Select(e=>DuctCreation.SourceSystemName(doc.GetElement(new ElementId(e.Owner)))).Distinct().Count()!=1)
+                        if (cluster.Select(e=>DuctCreation.SourceSystemName(doc.GetElement(ElementIds.Create(e.Owner)))).Distinct().Count()!=1)
                             throw new InvalidOperationException("Các duct khác System Name IFC; không nối hai mạng nguồn.");
                         FamilyInstance fitting=null;
                         if (ports.Count==3)
@@ -80,12 +80,12 @@ namespace IFCInfo
                         }
                         doc.Regenerate();
                         if (cluster.Any(e=>e.Get(doc)==null || !e.Get(doc).IsConnected)) throw new InvalidOperationException("Fitting chưa nối đủ các connector.");
-                        return fitting?.Id.Value.ToString() ?? string.Join(",",cluster.Select(e=>e.Owner));
+                        return fitting?.Id.Number().ToString() ?? string.Join(",",cluster.Select(e=>e.Owner));
                     });
                 }
                 if (request.FittingGapMm>1)
                 {
-                    var remaining=ids.SelectMany(id=>Ends(doc.GetElement(new ElementId(id)))).ToList();
+                    var remaining=ids.SelectMany(id=>Ends(doc.GetElement(ElementIds.Create(id)))).ToList();
                     var used=new HashSet<End>();
                     foreach (var end in remaining)
                     {
@@ -98,17 +98,17 @@ namespace IFCInfo
                                 throw new InvalidOperationException("Có nhiều cách nối qua khoảng hở; không tự chọn.");
                             var other=candidates[0]; used.Add(other);
                             var a=end.Get(doc); var b=other.Get(doc);
-                            if (DuctCreation.SourceSystemName(doc.GetElement(new ElementId(end.Owner)))!=DuctCreation.SourceSystemName(doc.GetElement(new ElementId(other.Owner))))
+                            if (DuctCreation.SourceSystemName(doc.GetElement(ElementIds.Create(end.Owner)))!=DuctCreation.SourceSystemName(doc.GetElement(ElementIds.Create(other.Owner))))
                                 throw new InvalidOperationException("Các duct khác System Name IFC.");
-                            if (doc.GetElement(new ElementId(end.Owner)).get_Parameter(BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM)?.AsElementId()!=
-                                doc.GetElement(new ElementId(other.Owner)).get_Parameter(BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM)?.AsElementId())
+                            if (doc.GetElement(ElementIds.Create(end.Owner)).get_Parameter(BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM)?.AsElementId()!=
+                                doc.GetElement(ElementIds.Create(other.Owner)).get_Parameter(BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM)?.AsElementId())
                                 throw new InvalidOperationException("Các duct khác System Type.");
                             double dot=a.CoordinateSystem.BasisZ.DotProduct(b.CoordinateSystem.BasisZ);
                             if (dot < -0.9999 && SameSize(a,b)) throw new InvalidOperationException("Khoảng hở thẳng cùng tiết diện cần thêm đoạn ống, không dùng fitting.");
                             var fitting=dot < -0.9999 ? doc.Create.NewTransitionFitting(a,b) : doc.Create.NewElbowFitting(a,b);
                             doc.Regenerate();
                             if (!end.Get(doc).IsConnected || !other.Get(doc).IsConnected) throw new InvalidOperationException("Fitting chưa nối đủ đầu ống.");
-                            return fitting.Id.Value.ToString();
+                            return fitting.Id.Number().ToString();
                         });
                     }
                 }
@@ -136,7 +136,7 @@ namespace IFCInfo
             }
             foreach (long id in ids)
             {
-                int open=Ends(doc.GetElement(new ElementId(id))).Count;
+                int open=Ends(doc.GetElement(ElementIds.Create(id))).Count;
                 if (open>0) rows.Add(new DuctRunRow { RunId=run,TargetId=id.ToString(),Status="Đầu ống còn hở",
                     Reason=open+" connector chưa nối. Không tự bắc cầu qua khoảng trống, chia ống hoặc sửa IFC fitting." });
             }
