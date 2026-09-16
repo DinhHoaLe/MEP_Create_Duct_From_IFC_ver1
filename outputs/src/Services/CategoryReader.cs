@@ -13,7 +13,7 @@ namespace IFCInfo
     /// <summary>Đọc Category, parameter hệ thống và ghép dữ liệu IFC theo GUID.</summary>
     internal static class CategoryReader
     {
-        public static void Configure(IFCInfoWindow window, Document linkedDoc, string ifcPath)
+        public static void Configure(IFCInfoWindow window, Document linkedDoc, LinkOption linkOption)
         {
             if (linkedDoc == null)
                 return;
@@ -23,11 +23,12 @@ namespace IFCInfo
                     .GroupBy(element => element.Category.Id.Value)
                     .Select(group => new CategoryOption { Id = group.Key, Name = group.First().Category.Name })
                     .OrderBy(category => category.Name).ToList();
-            window.LoadCategory = category => SetCategoryCount(window, linkedDoc, ifcPath, category);
+            window.LoadCategory = category => SetCategoryCount(window, linkedDoc, linkOption, category);
         }
 
-        private static void SetCategoryCount(IFCInfoWindow window, Document linkedDoc, string ifcPath, CategoryOption category)
+        private static void SetCategoryCount(IFCInfoWindow window, Document linkedDoc, LinkOption linkOption, CategoryOption category)
         {
+            string ifcPath = linkOption.IfcPath;
             window.AirTerminalCount = null;
             window.AirTerminalError = null;
             window.AirTerminals = new List<AirTerminalRow>();
@@ -57,7 +58,7 @@ namespace IFCInfo
                         Multiselect = false
                     };
                     if (picker.ShowDialog() == true)
-                        ifcPath = picker.FileName;
+                        ifcPath = linkOption.IfcPath = picker.FileName;
                 }
                 if (readIfc && File.Exists(ifcPath))
                 {

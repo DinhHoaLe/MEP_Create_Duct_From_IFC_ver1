@@ -15,7 +15,7 @@ not a general implementation of every geometry representation in either schema.
   BRep/tessellation/Boolean results. Fittings and flex ducts are not reconstructed.
 - IFC4X1/IFC4X3 are not included in this change.
 
-Validation: 20 reader assertions passed, including all six straight ducts in
+Historical validation before 16 September 2026: 20 reader assertions passed, including all six straight ducts in
 CADMEP_HVAC.ifc from AutoCAD MEP 2023 (75 x 75 mm; lengths 9083, 18299, 30156,
 39297, 58667, 97983 mm). IFC4 tests use synthetic reader fixtures, not a real
 IFC4 export or a Revit import test. The five fittings are excluded.
@@ -30,3 +30,6 @@ Revit validation remains necessary: replace the installed DLL while Revit is
 closed, restart Revit 2024, reload the IFC link as needed, and run the duct tool.
 Check ready/skipped counts, dimensions, endpoints and section orientation.
 No changes to the original IFC are needed.
+
+Current regression run (16 September 2026): 13 synthetic reader assertions pass. The external CADMEP sample is not bundled, so its seven additional assertions were not rerun. See CHANGELOG.md for the complete current test results.
+

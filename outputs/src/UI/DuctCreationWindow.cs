@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -120,12 +120,28 @@ namespace IFCInfo
             body.Children.Add(remember); body.Children.Add(fittings); body.Children.Add(terminals);
             body.Children.Add(IFCInfoWindow.Text("Khoảng hở tối đa cho elbow/transition (mm). Để 1 nếu chỉ nối các đầu gặp nhau; tăng nếu cho phép Revit điều chỉnh đầu ống.",13,"#526880"));
             var gap=new TextBox { Text="1",Width=100,HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,8,0,8) }; body.Children.Add(gap);
-            var preview = new DataGrid { ItemsSource = items, AutoGenerateColumns = false, CanUserAddRows = false, Height = 190, Margin = new Thickness(0,16,0,8) };
-            preview.Columns.Add(new DataGridCheckBoxColumn { Header = "Thực hiện", Binding = new System.Windows.Data.Binding("Include") });
+            var preview = new DataGrid { ItemsSource = items, AutoGenerateColumns = false, CanUserAddRows = false, CanUserDeleteRows = false, Height = 190, Margin = new Thickness(0,16,0,8) };
+            preview.Columns.Add(new DataGridCheckBoxColumn { Header = "Thực hiện", Binding = new System.Windows.Data.Binding("Include")
+                { Mode = System.Windows.Data.BindingMode.TwoWay, UpdateSourceTrigger = System.Windows.Data.UpdateSourceTrigger.PropertyChanged } });
             preview.Columns.Add(new DataGridTextColumn { Header = "Nguồn IFC", Binding = new System.Windows.Data.Binding("PreviewSource"), IsReadOnly=true });
             preview.Columns.Add(new DataGridTextColumn { Header = "Duct đích", Binding = new System.Windows.Data.Binding("PreviewTarget"), IsReadOnly=true });
             preview.Columns.Add(new DataGridTextColumn { Header = "Thay đổi", Binding = new System.Windows.Data.Binding("PreviewChange"), IsReadOnly=true });
             body.Children.Add(preview);
+            Action refreshSelection = () =>
+            {
+                int count = items.Count(i => i.Include);
+                create.Content = (updating ? "Cập nhật " : "Tạo ") + count + " Duct";
+                create.IsEnabled = count > 0;
+                ((TextBlock)summary.Child).Text = "Đã chọn: " + count + " đoạn     ·     Không chọn: "
+                    + (items.Count - count) + " đoạn     ·     Bỏ qua: " + issues.Count + " đoạn";
+            };
+            System.ComponentModel.PropertyChangedEventHandler selectionChanged = (s, e) =>
+            {
+                if (e.PropertyName == nameof(DuctPlanItem.Include)) refreshSelection();
+            };
+            foreach (var item in items) item.PropertyChanged += selectionChanged;
+            Closed += (s, e) => { foreach (var item in items) item.PropertyChanged -= selectionChanged; };
+            refreshSelection();
             var note = IFCInfoWindow.Text("Fitting dùng Routing Preferences. Chỉ nối cặp đầu ống có nghiệm duy nhất; tee cần 3 đầu gặp nhau, không tự chia ống. System Name IFC lưu trong Comments.", 13, "#526880");
             note.Margin = new Thickness(2,16,2,8); body.Children.Add(note);
             if (issues.Count > 0)
@@ -149,20 +165,25 @@ namespace IFCInfo
                 double gapMm;
                 if (!double.TryParse(gap.Text,out gapMm) || double.IsNaN(gapMm) || double.IsInfinity(gapMm) || gapMm<1 || gapMm>1000)
                 { feedback.Text="Khoảng hở fitting phải từ 1 đến 1000 mm."; return; }
-                if (!items.Any(i=>i.Include)) { feedback.Text = "Chọn ít nhất một dòng trong bảng xem trước."; return; }
-                if ((round != null && round.SelectedItem == null) || (rectangular != null && rectangular.SelectedItem == null) || mapping.Values.Any(b => b.SelectedItem == null))
+                var selected = items.Where(i => i.Include).ToList();
+                if (selected.Count == 0) { feedback.Text = "Chọn ít nhất một dòng trong bảng xem trước."; return; }
+                bool needsRound = selected.Any(i => i.Round), needsRectangular = selected.Any(i => !i.Round);
+                var systemKeys = new HashSet<string>(selected.Select(i => DuctRequest.SystemKey(i.Round, i.Source.SystemType)));
+                var levelKeys = new HashSet<string>(selected.Select(i => i.LevelKey ?? "Không có Level nguồn"));
+                if ((needsRound && round?.SelectedItem == null) || (needsRectangular && rectangular?.SelectedItem == null)
+                    || systemKeys.Any(key => mapping[key].SelectedItem == null))
                 {
                     feedback.Text = "Chọn đủ Duct Type và System Type. Nếu danh sách trống, hãy nạp type vào model chính rồi chạy lại.";
                     return;
                 }
                 Request = new DuctRequest
                 {
-                    Items = items.Where(i=>i.Include).ToList(),
-                    RoundTypeId = (round?.SelectedItem as DuctChoice)?.Id ?? 0,
-                    RectangularTypeId = (rectangular?.SelectedItem as DuctChoice)?.Id ?? 0,
-                    SystemTypes = mapping.ToDictionary(p => p.Key, p => ((DuctChoice)p.Value.SelectedItem).Id),
-                    Levels = levelMapping.ToDictionary(p => p.Key, p => ((DuctChoice)p.Value.SelectedItem).Id),
-                    Worksets = worksetMapping.ToDictionary(p => p.Key, p => ((DuctChoice)p.Value.SelectedItem).Id),
+                    Items = selected,
+                    RoundTypeId = needsRound ? ((DuctChoice)round.SelectedItem).Id : 0,
+                    RectangularTypeId = needsRectangular ? ((DuctChoice)rectangular.SelectedItem).Id : 0,
+                    SystemTypes = mapping.Where(p => systemKeys.Contains(p.Key)).ToDictionary(p => p.Key, p => ((DuctChoice)p.Value.SelectedItem).Id),
+                    Levels = levelMapping.Where(p => levelKeys.Contains(p.Key)).ToDictionary(p => p.Key, p => ((DuctChoice)p.Value.SelectedItem).Id),
+                    Worksets = worksetMapping.Where(p => systemKeys.Contains(p.Key)).ToDictionary(p => p.Key, p => ((DuctChoice)p.Value.SelectedItem).Id),
                     KeepSuccessful = policy.SelectedIndex == 1, SaveSettings = remember.IsChecked == true,
                     CreateFittings = fittings.IsChecked == true, ConnectTerminals = terminals.IsChecked == true,
                     FittingGapMm=gapMm,

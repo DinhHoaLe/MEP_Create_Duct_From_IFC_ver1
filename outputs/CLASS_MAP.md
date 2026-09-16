@@ -25,17 +25,14 @@ Các đường dẫn trên tính từ `src/`.
 | Giao diện chính, cột bảng, xuất clipboard | `UI/IFCInfoWindow.cs` |
 | Màu sắc, icon, dropdown, thanh bước | `UI/UiDesign.cs` |
 | Chọn type và ánh xạ hệ thống trước khi tạo ống | `UI/DuctCreationWindow.cs` |
-| Chọn Category/Type/Level và cách đặt native | `UI/NativePlacementWindow.cs` |
-| Đọc IFC2X3/IFC4, đơn vị, hệ thống, kích thước, Pset/Qto | `Ifc/IfcSourceReader.cs` |
+| Chọn family / Level để tạo miệng gió | `UI/AirTerminalReplacementWindow.cs` |
+| Đọc IFC2X3/IFC4, đơn vị, hệ thống, kích thước | `Ifc/IfcSourceReader.cs` |
 | Chuẩn bị và kiểm tra danh sách ống sẽ tạo | `Services/Ducts/DuctWorkflow.cs` |
 | Duct đã tồn tại ở vị trí nguồn hay chưa | `Services/Ducts/DuctExistenceChecker.cs` |
 | Thuật toán trùng toàn bộ / một phần đường tim, độc lập Revit | `Services/Ducts/DuctCoverage.cs` |
 | Đọc solid hoặc Duct native, xác định hình học | `Services/Ducts/DuctGeometryReader.cs` |
 | Duct.Create, đặt kích thước, góc, transaction, chống tạo lại | `Services/Ducts/DuctCreation.cs` |
-| Danh sách Category/Type trong model chính | `Services/PlacementCatalog.cs` |
-| Đặt family/tuyến native, host/adaptive, chống tạo lại | `Services/NativePlacement.cs` |
-| Dựng Wall/Floor/Roof và kiểm tra solid | `Services/NativeBuildingPlacement.cs` |
-| Lưu Pset nguồn kèm phần tử | `Services/IfcPropertyStorage.cs` |
+| Tạo miệng gió, chọn host, chống tạo lại | `Services/AirTerminals/AirTerminalReplacement.cs` |
 
 ## Các class dữ liệu — Models/
 
@@ -71,9 +68,7 @@ flowchart TD
     Settings --> Request[DuctRequest]
     Request --> Command
     Command --> Create[DuctCreation]
-    Command --> Native[NativePlacement]
-    Native --> Building[NativeBuildingPlacement]
-    Native --> Properties[IfcPropertyStorage]
+    Command --> Terminal[AirTerminalReplacement]
 ```
 
 ## Điểm cần lưu ý khi kiểm tra
@@ -81,10 +76,10 @@ flowchart TD
 - Tạo Duct: dung sai hình học giữ nguyên `0.002 feet` (khoảng 0,6 mm).
 - Cột đối chiếu Duct: so đường tim và kích thước với sai số `1 mm`, kiểm tra System Type đích khi xác định được. Xem `DUCT_COMPARISON.md` về trạng thái và giới hạn.
 - `DuctWorkflow.Configure` phải chạy sau `CategoryReader.Configure`: workflow bổ sung bước kiểm tra tồn tại vào callback đọc Category.
-- Bản mở rộng Category/native/Pset thay thế luồng AirTerminalReplacement cũ bằng NativePlacement. Xem CATEGORY_NATIVE_PSET.md để biết phạm vi hiện tại.
+- CategoryReader giữ đường dẫn IFC đã chọn trên LinkOption của phiên; DuctCreationWindow chỉ kiểm tra và lưu ánh xạ cho các dòng Include=true.
 - Project chỉ compile `src/**/*.cs`. Bản mã cũ được chuyển sang thư mục backup trong `work/`, tránh có hai bản dễ nhầm.
 
-## Kiểm tra đã chạy
+## Kết quả lịch sử trước bản sửa 16/09/2026
 
 - Build Release: 0 lỗi, 0 cảnh báo.
 - Giao diện: dropdown link/Category, chuyển bước, đổi link, link chưa load, cột trạng thái và dữ liệu xuất.
@@ -93,3 +88,6 @@ flowchart TD
 - Thuật toán đường tim: kiểm tra nhiều đoạn liên tiếp phủ đủ chiều dài.
 - 24 file class cấp cao có tên file trùng tên class.
 - Chưa kiểm thử transaction tạo phần tử trực tiếp trong Revit sau refactor.
+
+Kết quả kiểm tra bản hiện tại xem CHANGELOG.md. DuctPlanItem phát PropertyChanged cho Include để cập nhật số lượng chọn. UiPreview dùng ProjectReference tới IFCInfo.csproj; Test-DuctUi.ps1 kiểm tra tạo/cập nhật ngoài Revit.
+
