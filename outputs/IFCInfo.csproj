@@ -22,4 +22,7 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+  <Target Name="PublishLocalAddin" AfterTargets="Build" Condition="'$(AssemblyName)' == 'IFCInfo'">
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(MSBuildProjectDirectory)\IFCInfo.dll" />
+  </Target>
 </Project>

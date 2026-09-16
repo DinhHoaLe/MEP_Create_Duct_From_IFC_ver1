@@ -50,7 +50,7 @@ $nativeLevels=New-Object 'System.Collections.Generic.List[IFCInfo.ReplacementLev
 $level=New-Object IFCInfo.ReplacementLevelOption; $level.Id=1; $level.Label='Level 1'; $nativeLevels.Add($level)
 $nativeSystems=New-Object 'System.Collections.Generic.List[IFCInfo.ReplacementTypeOption]'
 $system=New-Object IFCInfo.ReplacementTypeOption; $system.Id=20; $system.Kind='Pipe'; $system.Label='Water'; $nativeSystems.Add($system)
-$native=New-Object IFCInfo.NativePlacementWindow -ArgumentList $sourceRows,$nativeTypes,$nativeLevels,$nativeSystems,12
+$native=New-Object IFCInfo.NativePlacementWindow -ArgumentList $sourceRows,$nativeTypes,$nativeLevels,$nativeSystems,12,'Wall',$null
 Render $native 'native-placement.png' 780 700
 function Controls($root) {
     if ($root -is [Windows.FrameworkElement] -and $root.Name) { $root }
@@ -62,15 +62,30 @@ $typeBox=$controls | Where-Object Name -eq TargetType | Select-Object -First 1
 $systemBox=$controls | Where-Object Name -eq TargetSystem | Select-Object -First 1
 $create=$controls | Where-Object Name -eq CreateNative | Select-Object -First 1
 if ($category.SelectedItem.Name -ne 'Wall') { throw 'Source category default failed' }
+if ($category.IsEnabled -or $category.Items.Count -ne 1 -or @($typeBox.Items | Where-Object CategoryId -ne 12).Count) { throw 'Source category must be locked and types filtered' }
 $typeBox.SelectedIndex=0
 if (!$create.IsEnabled -or $systemBox.IsEnabled) { throw 'Wall placement validation failed' }
-$category.SelectedItem=@($category.Items | Where-Object Name -eq Pipe)[0]; $typeBox.SelectedIndex=0
-if (!$systemBox.IsEnabled -or !$create.IsEnabled) { throw 'Pipe system selection failed' }
-$category.SelectedItem=@($category.Items | Where-Object Name -eq Unsupported)[0]; $typeBox.SelectedIndex=0
-if ($create.IsEnabled) { throw 'Unsupported type must be disabled' }
-$category.SelectedItem=@($category.Items | Where-Object Name -eq Wall)[0]; $typeBox.SelectedIndex=0
 Render $native 'native-placement.png' 780 700
 $scroll=$native.Content.Children | Where-Object { $_ -is [Windows.Controls.ScrollViewer] } | Select-Object -First 1
 $scroll.ScrollToEnd(); Render $native 'native-placement-options.png' 780 700
 $native.Close()
-Write-Output 'Three WPF windows rendered; 4 category/type validation checks passed.'
+foreach ($option in $nativeTypes) {
+    $check=New-Object IFCInfo.NativePlacementWindow -ArgumentList $sourceRows,$nativeTypes,$nativeLevels,$nativeSystems,$option.CategoryId,$option.CategoryName,$null
+    Render $check 'native-category-check.png' 780 700
+    $controls=@(Controls $check.Content)
+    $cat=$controls | Where-Object Name -eq TargetCategory | Select-Object -First 1
+    $target=$controls | Where-Object Name -eq TargetType | Select-Object -First 1
+    $button=$controls | Where-Object Name -eq CreateNative | Select-Object -First 1
+    if ($cat.IsEnabled -or $cat.Items.Count -ne 1 -or $target.Items.Count -ne 1 -or $target.SelectedItem.CategoryId -ne $option.CategoryId) { throw 'Cross-category type leaked into selection' }
+    if ($button.IsEnabled -ne $option.Supported) { throw 'Supported type validation failed' }
+    $check.Close()
+}
+$missing=New-Object IFCInfo.NativePlacementWindow -ArgumentList $sourceRows,$nativeTypes,$nativeLevels,$nativeSystems,999,'Duct Fittings',$null
+Render $missing 'native-missing-fitting.png' 780 700
+$controls=@(Controls $missing.Content)
+$category=$controls | Where-Object Name -eq TargetCategory | Select-Object -First 1
+$typeBox=$controls | Where-Object Name -eq TargetType | Select-Object -First 1
+$create=$controls | Where-Object Name -eq CreateNative | Select-Object -First 1
+if ($category.SelectedItem.Name -ne 'Duct Fittings' -or $typeBox.Items.Count -ne 0 -or $create.IsEnabled) { throw 'Missing fitting category state failed' }
+$missing.Close()
+Write-Output 'WPF checks passed: locked category, six category/type cases, and missing Duct Fittings.'

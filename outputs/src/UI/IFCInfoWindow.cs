@@ -63,6 +63,7 @@ namespace IFCInfo
         public string IfcSourceStatus { get; set; } = "Chưa đọc IFC gốc.";
         public List<AirTerminalRow> AirTerminals { get; set; } = new List<AirTerminalRow>();
         public List<ReplacementTypeOption> ReplacementTypes { get; set; } = new List<ReplacementTypeOption>();
+        public Func<string, long, List<ReplacementTypeOption>> LoadPlacementFamily { get; set; }
         public List<ReplacementTypeOption> ReplacementSystems { get; set; } = new List<ReplacementTypeOption>();
         public List<ReplacementLevelOption> ReplacementLevels { get; set; } = new List<ReplacementLevelOption>();
         public ReplacementRequest Replacement
@@ -88,7 +89,7 @@ namespace IFCInfo
 
         public IFCInfoWindow()
         {
-            Title = "Tạo phần tử Revit từ IFC";
+            Title = "IFC · Ducts & Duct Fittings · 12.09.2026";
             Width = 1160;
             Height = 800;
             MinWidth = 640;
@@ -161,10 +162,11 @@ namespace IFCInfo
             var next = Button("Tiếp tục →", true);
             next.IsEnabled = false;
             buttons.Children.Add(next);
-            var replace = Button("Đặt theo Category / Type →", true);
+            var replace = Button("Chọn Family / Type cùng Category →", true);
             replace.Visibility = Visibility.Collapsed;
             buttons.Children.Add(replace);
             var create = Button("Tạo Duct →", true);
+            create.Name = "CreateSelectedCategory";
             create.Visibility = Visibility.Collapsed;
             buttons.Children.Add(create);
             var close = Button("Đóng", false);
@@ -182,14 +184,14 @@ namespace IFCInfo
                 BorderThickness = new Thickness(1),
                 Effect = UiDesign.Shadow()
             });
-            var sourceTitle = Text("Thông tin nguồn", 22, "#102A50");
+            var sourceTitle = Text("Chỉ Ducts & Duct Fittings · 12.09.2026", 22, "#102A50");
             sourceTitle.FontWeight = FontWeights.SemiBold;
             card.Children.Add(sourceTitle);
-            var description = Text("Chọn IFC link và Category nguồn, sau đó chọn Category / Type đích trong Revit.", 15, "#647FA6");
+            var description = Text("Chọn IFC link, sau đó chọn Ducts hoặc Duct Fittings để tạo trong Revit.", 15, "#647FA6");
             description.Margin = new Thickness(0, 8, 0, 0);
             card.Children.Add(description);
             var linkBox = UiDesign.Field(card, "IFC link", "Chọn link nguồn từ mô hình IFC", "Chọn IFC link...", false);
-            var categoryBox = UiDesign.Field(card, "Category nguồn", "Các category có phần tử trong IFC link", "Chọn Category...", true);
+            var categoryBox = UiDesign.Field(card, "Category nguồn", "Chỉ Ducts và Duct Fittings có trong IFC link", "Chọn Category...", true);
             categoryBox.IsEnabled = false;
             var scroll = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
             root.Children.Add(scroll);
@@ -223,9 +225,10 @@ namespace IFCInfo
                 try
                 {
                     LoadLink?.Invoke(SelectedLink);
+                    Categories = Categories.Where(c => SupportedCategories.Contains(c.Id)).ToList();
                     categoryBox.ItemsSource = Categories;
                     categoryBox.IsEnabled = Categories.Count > 0;
-                    feedback.Text = Categories.Count == 0 ? "Link không có Category chứa phần tử." : "Chọn Category rồi bấm Tiếp tục.";
+                    feedback.Text = Categories.Count == 0 ? "Link không có Ducts hoặc Duct Fittings." : "Chọn Ducts hoặc Duct Fittings rồi bấm Tiếp tục.";
                 }
                 catch (Exception ex) { feedback.Text = "Không đọc được link: " + ex.Message; }
             };
@@ -249,7 +252,8 @@ namespace IFCInfo
                 back.Visibility = Visibility.Visible;
                 copy.Visibility = Visibility.Visible;
                 replace.Visibility = CanReplaceCategory ? Visibility.Visible : Visibility.Collapsed;
-                create.Visibility = CanCreateDucts ? Visibility.Visible : Visibility.Collapsed;
+                create.Content = CanCreateDucts ? "Tạo Duct →" : "Tạo Duct Fitting →";
+                create.Visibility = CanCreateDucts || CanReplaceCategory ? Visibility.Visible : Visibility.Collapsed;
                 feedback.Text = "Tích chọn các phần tử cần tạo trong model chính.";
             };
             back.Click += (s, e) =>
@@ -265,21 +269,11 @@ namespace IFCInfo
             };
             replace.Click += (s, e) =>
             {
-                var selected = AirTerminals.Where(row => row.IsSelected && row.CanSelect).ToList();
-                if (selected.Count == 0)
-                {
-                    feedback.Text = "Hãy tích chọn ít nhất một phần tử nguồn.";
-                    return;
-                }
-                var dialog = new NativePlacementWindow(selected, ReplacementTypes, ReplacementLevels,ReplacementSystems,SelectedCategory.Id) { Owner = this };
-                if (dialog.ShowDialog() == true)
-                {
-                    Replacement = dialog.Request;
-                    Close();
-                }
+                OpenPlacement();
             };
             create.Click += (s, e) =>
             {
+                if (!CanCreateDucts) { OpenPlacement(); return; }
                 var selected = AirTerminals.Where(row => row.IsSelected && row.CanSelect).ToList();
                 if (selected.Count == 0)
                 {
@@ -297,6 +291,24 @@ namespace IFCInfo
                 }
                 catch (Exception ex) { feedback.Text = "Không chuẩn bị được Duct: " + ex.Message; }
             };
+        }
+
+        private void OpenPlacement()
+        {
+            var selected = AirTerminals.Where(row => row.IsSelected && row.CanSelect).ToList();
+            if (selected.Count == 0)
+            {
+                feedback.Text = "Hãy tích chọn ít nhất một phần tử IFC để đặt tại vị trí nguồn.";
+                return;
+            }
+            if (SelectedCategory == null) return;
+            try
+            {
+                var dialog = new NativePlacementWindow(selected, ReplacementTypes, ReplacementLevels, ReplacementSystems,
+                    SelectedCategory.Id, SelectedCategory.Name, LoadPlacementFamily) { Owner = this };
+                if (dialog.ShowDialog() == true) { Replacement = dialog.Request; Close(); }
+            }
+            catch (Exception ex) { feedback.Text = "Không mở được bước đặt family: " + ex.Message; }
         }
 
         private FrameworkElement CountPage()
@@ -441,10 +453,18 @@ namespace IFCInfo
                 selectionBar.Children.Add(update);
                 if (SavedDuctRuns.Count>0)
                 {
-                    var runs=new ComboBox { ItemsSource=SavedDuctRuns.Keys.OrderByDescending(k=>k).ToList(),Width=280,Margin=new Thickness(4),SelectedIndex=0 };
-                    selectionBar.Children.Add(runs);
                     var chooseRun=Button("Chọn duct của lượt đã lưu",false);
-                    chooseRun.Click+=(s,e)=> { if (runs.SelectedItem!=null) { RunSelection=SavedDuctRuns[(string)runs.SelectedItem]; Close(); } };
+                    chooseRun.Click+=(s,e)=>
+                    {
+                        var menu=new ContextMenu { PlacementTarget=chooseRun };
+                        foreach (string run in SavedDuctRuns.Keys.OrderByDescending(k=>k))
+                        {
+                            var entry=new MenuItem { Header=run };
+                            entry.Click+=(sender,args)=> { RunSelection=SavedDuctRuns[run]; Close(); };
+                            menu.Items.Add(entry);
+                        }
+                        menu.IsOpen=true;
+                    };
                     selectionBar.Children.Add(chooseRun);
                 }
             }

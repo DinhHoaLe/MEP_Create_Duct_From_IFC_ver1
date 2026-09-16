@@ -16,7 +16,8 @@ namespace IFCInfo
         }
         public NativePlacementWindow(List<AirTerminalRow> rows,
             List<ReplacementTypeOption> types, List<ReplacementLevelOption> levels,
-            List<ReplacementTypeOption> systems = null,long sourceCategoryId = 0)
+            List<ReplacementTypeOption> systems = null,long sourceCategoryId = 0,
+            string sourceCategoryName = null, Func<string,long,List<ReplacementTypeOption>> loadFamily = null)
         {
             Title = "Đặt phần tử native theo IFC · Revit 2024";
             Width = 780;
@@ -34,7 +35,7 @@ namespace IFCInfo
             var header = new Border { Background = IFCInfoWindow.Brush("#132B46"), Padding = new Thickness(24) };
             var head = new StackPanel();
             head.Children.Add(IFCInfoWindow.Text("BƯỚC 3 · ĐẶT PHẦN TỬ REVIT", 11, "#9DBCD8"));
-            var title = IFCInfoWindow.Text("Chọn Category và Type đích", 24, "#FFFFFF");
+            var title = IFCInfoWindow.Text("Chọn Family / Type cùng Category IFC", 24, "#FFFFFF");
             title.Margin = new Thickness(0, 8, 0, 0);
             head.Children.Add(title);
             header.Child = head;
@@ -50,7 +51,7 @@ namespace IFCInfo
             cancel.IsCancel = true;
             cancel.Click += (s, e) => Close();
             buttons.Children.Add(cancel);
-            var create = IFCInfoWindow.Button("Đặt " + rows.Count + " phần tử", true); create.Name="CreateNative";
+            var create = IFCInfoWindow.Button("Đặt " + rows.Count + " phần tử theo IFC", true); create.Name="CreateNative";
             buttons.Children.Add(create);
             footerStack.Children.Add(buttons);
             footer.Child = footerStack;
@@ -63,9 +64,10 @@ namespace IFCInfo
             scroll.Content = body;
             body.Children.Add(IFCInfoWindow.Text("Đã chọn " + rows.Count + " phần tử từ IFC link", 18, "#172B45"));
             body.Children.Add(IFCInfoWindow.Text("IFC được giữ làm tham chiếu. Chỉ các dòng bạn đã chọn được tạo mới.", 13, "#526880"));
-            Label(body,"CATEGORY TRONG MODEL REVIT CHÍNH");
-            var categories=types.GroupBy(t=>t.CategoryId).Select(g=>new CategoryOption { Id=g.Key,Name=g.First().CategoryName??"Family" }).OrderBy(c=>c.Name).ToList();
-            var categoryBox=new ComboBox { Name="TargetCategory",ItemsSource=categories,MinHeight=36,IsTextSearchEnabled=true }; body.Children.Add(categoryBox);
+            Label(body,"CATEGORY THEO IFC · CỐ ĐỊNH");
+            var categories=new List<CategoryOption> { new CategoryOption { Id=sourceCategoryId,
+                Name=sourceCategoryName??types.FirstOrDefault(t=>t.CategoryId==sourceCategoryId)?.CategoryName??"Chưa xác định Category nguồn" } };
+            var categoryBox=new ComboBox { Name="TargetCategory",ItemsSource=categories,MinHeight=36,IsEnabled=false }; body.Children.Add(categoryBox);
             Label(body,"TÌM FAMILY / TYPE");
             var search=new TextBox { MinHeight=30 }; body.Children.Add(search);
             Label(body, "FAMILY / TYPE ĐÍCH");
@@ -78,6 +80,10 @@ namespace IFCInfo
                 HorizontalContentAlignment = HorizontalAlignment.Stretch
             };
             body.Children.Add(typeBox);
+            var load = IFCInfoWindow.Button("Nạp Family (.rfa)…", false);
+            load.Name="LoadPlacementFamily";
+            load.Visibility=loadFamily==null ? Visibility.Collapsed : Visibility.Visible;
+            body.Children.Add(load);
             var placement = IFCInfoWindow.Text("Chọn type đã load trong model Revit chính.", 12, "#526880");
             placement.Margin = new Thickness(0, 8, 0, 0);
             body.Children.Add(placement);
@@ -99,21 +105,20 @@ namespace IFCInfo
             body.Children.Add(angle);
             var notes = IFCInfoWindow.Text("Family điểm dùng điểm đặt nguồn hoặc tâm khung bao; góc xoay nhập thêm quanh Z/pháp tuyến host. " +
                 "Family cần host sẽ yêu cầu chọn mặt phẳng; Adaptive yêu cầu chọn các điểm điều khiển cho từng nguồn. Family theo đường có thể chọn 2 điểm nếu không đọc được đường nguồn.\n\n" +
-                "Duct/Pipe/Cable Tray/Conduit dùng đường tim; chiều dài mới giữ đầu thứ nhất và đổi đầu còn lại. " +
-                "Wall/Floor/Roof dựng native theo hình học hỗ trợ, không dùng khung bao thay hình học. Các type/kích thước không khớp sẽ báo lỗi.\n\n" +
+                "Duct dùng đường tim; chiều dài mới giữ đầu thứ nhất và đổi đầu còn lại. Duct Fitting dùng family cùng Category đã chọn.\n\n" +
                 "Kết quả sau đặt có IFC Pset/Qto (nếu có), lưu kèm phần tử và có thể xuất CSV. Đây là dữ liệu nguồn, không tự biến thành shared parameter của Revit.", 13, "#526880");
             notes.Margin = new Thickness(0, 20, 0, 0);
             body.Children.Add(notes);
             Action validate = () =>
             {
                 var type = typeBox.SelectedItem as ReplacementTypeOption;
-                create.IsEnabled = rows.Count > 0 && type != null && type.Supported && levelBox.SelectedItem != null &&
+                create.IsEnabled = sourceCategoryId != 0 && rows.Count > 0 && type != null && type.CategoryId==sourceCategoryId && type.Supported && levelBox.SelectedItem != null &&
                     ((type.Kind!="Duct" && type.Kind!="Pipe") || systemBox.SelectedItem!=null) &&
                     (type.PlacementMode!="TwoLevelsBased" || topLevel.SelectedItem!=null);
                 placement.Text = type == null ? "Chọn type đã load trong model chính." : type.Placement;
-                status.Text = types.Count == 0 ? "Chưa có Family/Type trong model chính. Hãy load family rồi chạy lại tool." :
+                status.Text = typeBox.Items.Count == 0 ? "Không có Family/Type trong Category này hoặc không khớp tìm kiếm. Xóa từ tìm kiếm hoặc bấm Nạp Family (.rfa)." :
                     levels.Count == 0 ? "Model chính chưa có Level." :
-                    type != null && !type.Supported ? "Kiểu đặt family này chưa được hỗ trợ. Hãy chọn type khác." : "";
+                    type != null && !type.Supported ? type.Placement : type==null ? "Chọn Family / Type đích để tiếp tục." : "";
             };
             typeBox.SelectionChanged += (s, e) =>
             {
@@ -132,7 +137,23 @@ namespace IFCInfo
             Action filter=()=>
             {
                 var category=categoryBox.SelectedItem as CategoryOption;
-                typeBox.ItemsSource=types.Where(t=>t.CategoryId==category?.Id && t.Label.IndexOf(search.Text,StringComparison.OrdinalIgnoreCase)>=0).ToList(); validate();
+                var previous=typeBox.SelectedItem as ReplacementTypeOption;
+                var matches=types.Where(t=>sourceCategoryId!=0 && t.CategoryId==sourceCategoryId && t.Label.IndexOf(search.Text,StringComparison.OrdinalIgnoreCase)>=0).ToList();
+                typeBox.ItemsSource=matches;
+                typeBox.SelectedItem=matches.FirstOrDefault(t=>t.Id==previous?.Id) ?? (matches.Count==1 ? matches[0] : null);
+                validate();
+            };
+            load.Click += (s,e) =>
+            {
+                var picker=new Microsoft.Win32.OpenFileDialog { Title="Nạp family vào model Revit chính",Filter="Revit Family (*.rfa)|*.rfa",CheckFileExists=true };
+                if (picker.ShowDialog(this)!=true) return;
+                try
+                {
+                    types=loadFamily(picker.FileName,sourceCategoryId);
+                    search.Text="";
+                    filter();
+                }
+                catch (Exception ex) { status.Text="Không nạp được family: "+ex.Message; }
             };
             categoryBox.SelectionChanged+=(s,e)=>filter(); search.TextChanged+=(s,e)=>filter();
             systemBox.SelectionChanged+=(s,e)=>validate();
@@ -155,7 +176,7 @@ namespace IFCInfo
                 }
                 var type = typeBox.SelectedItem as ReplacementTypeOption;
                 var level = levelBox.SelectedItem as ReplacementLevelOption;
-                if (type == null || !type.Supported || level == null)
+                if (sourceCategoryId==0 || type == null || type.CategoryId!=sourceCategoryId || !type.Supported || level == null)
                     return;
                 double lengthMm=0;
                 if (length.IsEnabled && (!double.TryParse(length.Text,NumberStyles.Float,CultureInfo.CurrentCulture,out lengthMm) || double.IsNaN(lengthMm) || double.IsInfinity(lengthMm) || lengthMm<0))
@@ -163,6 +184,7 @@ namespace IFCInfo
                 Request = new ReplacementRequest
                 {
                     TypeId = type.Id,
+                    SourceCategoryId = sourceCategoryId,
                     LevelId = level.Id,
                     RotationDegrees = degrees,
                     Kind=type.Kind,SystemTypeId=(systemBox.SelectedItem as ReplacementTypeOption)?.Id??0,

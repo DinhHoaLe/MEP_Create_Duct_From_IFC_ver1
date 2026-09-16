@@ -18,11 +18,21 @@ namespace IFCInfo
         internal static void Execute(UIDocument ui,RevitLinkInstance link,IFCInfoWindow window)
         {
             var request=window.Replacement; if (request==null) return;
+            if (!SupportedCategories.Contains(request.SourceCategoryId))
+                throw new InvalidOperationException("Tool chỉ hỗ trợ Ducts và Duct Fittings.");
             var doc=ui.Document; var linked=link.GetLinkDocument();
             if (linked==null || doc.IsReadOnly || doc.IsFamilyDocument) throw new InvalidOperationException("Cần project có thể sửa và link đã load.");
             var type=doc.GetElement(new ElementId(request.TypeId)) as ElementType;
             var level=doc.GetElement(new ElementId(request.LevelId)) as Level;
             if (type==null || level==null) throw new InvalidOperationException("Type/Level không còn tồn tại.");
+            if (request.SourceCategoryId == 0 || type.Category?.Id.Value != request.SourceCategoryId)
+                throw new InvalidOperationException("Category của Type đích phải trùng Category nguồn IFC.");
+            foreach (string sourceId in request.SourceIds)
+            {
+                var sourceElement=linked.GetElement(new ElementId(long.Parse(sourceId)));
+                if (sourceElement?.Category?.Id.Value != request.SourceCategoryId)
+                    throw new InvalidOperationException("Nguồn " + sourceId + " không còn tồn tại hoặc khác Category đã chọn. Hãy đọc lại IFC link.");
+            }
             var symbol=type as FamilySymbol;
             Reference hostReference=null; PlanarFace hostFace=null; Element host=null;
             if (symbol!=null && (symbol.Family.FamilyPlacementType==FamilyPlacementType.OneLevelBasedHosted || symbol.Family.FamilyPlacementType==FamilyPlacementType.WorkPlaneBased))

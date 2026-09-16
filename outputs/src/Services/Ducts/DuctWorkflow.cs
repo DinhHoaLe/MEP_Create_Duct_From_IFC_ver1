@@ -37,6 +37,8 @@ namespace IFCInfo
                         Element source = link.GetLinkDocument()?.GetElement(new ElementId(long.Parse(row.ElementId)));
                         if (source == null)
                             throw new InvalidOperationException("Không tìm thấy phần tử nguồn.");
+                        if (source.Category?.Id.Value != (long)BuiltInCategory.OST_DuctCurves)
+                            throw new InvalidOperationException("Chỉ tạo Duct từ Category Ducts của IFC.");
                         string key = link.UniqueId + "|" + (string.IsNullOrWhiteSpace(row.IfcGuid) ? source.UniqueId : row.IfcGuid);
                         if (!updating && existing.Contains(key))
                             throw new InvalidOperationException("Đã tạo Duct từ nguồn này trước đó.");

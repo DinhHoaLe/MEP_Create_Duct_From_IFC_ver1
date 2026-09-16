@@ -6,6 +6,7 @@ namespace IFCInfo
     public sealed class ReplacementRequest
     {
         public long TypeId { get; set; }
+        public long SourceCategoryId { get; set; }
         public long LevelId { get; set; }
         public double RotationDegrees { get; set; }
         public List<string> SourceIds { get; set; }

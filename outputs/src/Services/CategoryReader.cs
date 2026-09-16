@@ -19,7 +19,7 @@ namespace IFCInfo
                 return;
             using (var collector = new FilteredElementCollector(linkedDoc))
                 window.Categories = collector.WhereElementIsNotElementType().ToElements()
-                    .Where(element => element.Category != null && element.Category.CategoryType == CategoryType.Model)
+                    .Where(element => element.Category != null && SupportedCategories.Contains(element.Category.Id.Value))
                     .GroupBy(element => element.Category.Id.Value)
                     .Select(group => new CategoryOption { Id = group.Key, Name = group.First().Category.Name })
                     .OrderBy(category => category.Name).ToList();
@@ -31,9 +31,11 @@ namespace IFCInfo
             window.AirTerminalCount = null;
             window.AirTerminalError = null;
             window.AirTerminals = new List<AirTerminalRow>();
-            window.CanReplaceCategory = true;
-            bool isDuct = category.Id == (long)BuiltInCategory.OST_DuctCurves ||
-                category.Id == (long)BuiltInCategory.OST_FlexDuctCurves;
+            window.CanReplaceCategory = category != null && SupportedCategories.Contains(category.Id);
+            window.CanCreateDucts = false;
+            if (!window.CanReplaceCategory)
+                throw new InvalidOperationException("Tool chỉ hỗ trợ Ducts và Duct Fittings.");
+            bool isDuct = category.Id == (long)BuiltInCategory.OST_DuctCurves;
             window.CanCreateDucts = isDuct;
             bool readIfc = window.CanReplaceCategory || isDuct;
             window.IfcSourceStatus = "Dữ liệu parameter trong Revit link.";
