@@ -1,5 +1,7 @@
 # Tiến độ 7 bước — 10/09/2026
 
+Ghi chép lịch sử ngày 10/09/2026. Bản sửa và kiểm tra ngày 16/09/2026 xem CHANGELOG.md; hướng dẫn hiện tại xem HUONG_DAN_CSHARP.txt. Các ca nghiệm thu Revit chưa được thực hiện vẫn giữ trạng thái chờ.
+
 **Đã triển khai code cho cả 7 mục.** Build Revit 2024 Release thành công, 0 lỗi / 0 cảnh báo.
 64 kiểm tra tự động đạt; đã dựng và xem ảnh hai cửa sổ WPF ngoài Revit.
 
@@ -81,3 +83,4 @@ thao tác model trong Revit, vì vậy chưa đánh dấu nghiệm thu thực t�
 - `dotnet build outputs/IFCInfo.csproj -c Release --no-restore`: 0 lỗi, 0 cảnh báo.
 
 Chưa cài DLL vào thư mục add-in, chưa chạy sửa model Revit, chưa commit/merge.
+

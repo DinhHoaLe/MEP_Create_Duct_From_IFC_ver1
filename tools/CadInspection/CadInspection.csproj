@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup><TargetFramework>net48</TargetFramework><LangVersion>latest</LangVersion><PlatformTarget>x64</PlatformTarget></PropertyGroup>
+ <ItemGroup>
+  <Reference Include="AcDbMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2023\acdbmgd.dll</HintPath><Private>false</Private></Reference>
+  <Reference Include="AcCoreMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2023\accoremgd.dll</HintPath><Private>false</Private></Reference>
+  <Reference Include="AcMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2023\acmgd.dll</HintPath><Private>false</Private></Reference>
+  <Reference Include="System.Web.Extensions" />
+ </ItemGroup>
+</Project>

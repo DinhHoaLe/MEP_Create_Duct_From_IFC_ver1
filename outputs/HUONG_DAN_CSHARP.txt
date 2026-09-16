@@ -1,22 +1,55 @@
-IFC INFO — C# REVIT 2024 ADD-IN
+IFC INFO — HƯỚNG DẪN HIỆN TẠI, REVIT 2024
+Cập nhật: 16/09/2026
 
-1. Mở IFCInfo.csproj bằng Visual Studio có .NET SDK và
-   .NET Framework 4.8 Developer Pack.
-2. Project đã cấu hình Revit 2024, .NET Framework 4.8, x64.
-   Nếu Revit cài ở chỗ khác, sửa RevitApiDir trong project.
-3. Dùng IFCInfo.dll đã build kèm theo hoặc Build Release để tạo lại DLL.
-4. Copy DLL vào C:\RevitAddins\IFCInfo\ hoặc sửa Assembly trong
-   IFCInfo.addin thành đường dẫn đầy đủ đến DLL bạn vừa build.
-5. Copy IFCInfo.addin vào %APPDATA%\Autodesk\Revit\Addins\2024\
-   rồi khởi động lại Revit 2024.
-6. Mở project → Add-Ins → External Tools → IFC Info.
-7. Click chọn link; Esc để hủy. Mở rộng hộp thoại để xem nguồn thông tin.
+1. CÀI ĐẶT
+- Yêu cầu Revit 2024, .NET Framework 4.8, Windows x64.
+- Build bằng: dotnet build outputs/IFCInfo.csproj -c Release
+- DLL build ở outputs/bin/Release/net48/IFCInfo.dll. DLL phát hành kèm theo ở outputs/IFCInfo.dll.
+- Đóng Revit trước khi thay DLL đã cài. Copy DLL vào C:\RevitAddins\IFCInfo\ hoặc sửa Assembly trong IFCInfo.addin thành đường dẫn DLL của bạn.
+- Copy IFCInfo.addin vào %APPDATA%\Autodesk\Revit\Addins\2024\ rồi mở lại Revit.
+- Chạy Add-Ins → External Tools → IFC Info; hoặc dùng Add-In Manager Manual để nạp DLL.
+- Đây là add-in C#, không yêu cầu pyRevit hay thư mục IFCInfo.extension.
 
-Chỉ đọc dữ liệu, không sửa model. Ưu tiên metadata Original IFC File Name
-trong Project Information của linked document. Nếu thiếu, suy luận từ
-đuôi .ifc.RVT và ghi rõ. Không xác minh file nguồn còn tồn tại.
-Chỉ hỗ trợ RevitLinkInstance trực tiếp trong model hiện hành.
-Không hỗ trợ IFC đã bind, import thành phần tử hoặc nested link.
+2. CHỌN NGUỒN
+- Mở project, chạy tool, chọn IFC link đã load và Category, bấm Tiếp tục.
+- Hỗ trợ RevitLinkInstance trực tiếp. Không xử lý IFC đã bind/import hoặc nested link.
+- Nếu không tìm thấy IFC gốc, chọn file .ifc đúng với link. Đường dẫn chọn thủ công được nhớ theo từng lựa chọn link trong phiên hộp thoại, kể cả quay lại/đổi Category rồi chọn lại link; không lưu qua lần đóng/mở tool.
+- Reader hỗ trợ STEP IFC2X3 và IFC4 trong phạm vi IFC_COMPATIBILITY.md. Chưa hỗ trợ IFC4X1/IFC4X3.
+- Nếu file IFC trên đĩa thay đổi, reload cùng link trong Revit trước khi tạo/cập nhật. Khớp GUID không xác nhận link đã được reload.
 
-Đã build Release với API Revit 2024: 0 lỗi, 0 cảnh báo.
-Chưa chạy kiểm thử thao tác chọn link trực tiếp trong Revit.
+3. TẠO DUCT
+- Chọn Category Ducts, xem cột đối chiếu và tooltip, tích chọn nguồn rồi bấm Tạo Duct.
+- Nguồn DirectShape cần một solid ống thẳng khớp GUID/kích thước IFC. Duct native thẳng có thể đọc trực tiếp. Flex, cong, oval và hình học không hỗ trợ được báo bỏ qua.
+- Chọn Duct Type theo tiết diện; ánh xạ System Type, Level và Workset nếu model workshared.
+- Bảng xem trước dùng checkbox Thực hiện để bỏ chọn; không cho xóa dòng bằng Delete. Chỉ nhóm còn được chọn phải có type/ánh xạ. Số lượng trên nút cập nhật theo lựa chọn; dòng bỏ chọn vẫn xuất hiện trong báo cáo.
+- Mặc định chọn Level dưới cao độ đầu thấp nhất hoặc dùng ánh xạ Level; Workset hiện hành khi tạo, giữ Workset khi cập nhật nếu không ánh xạ.
+- Mặc định hoàn tác toàn bộ nếu một thao tác thực thi lỗi. Có thể chọn Bỏ qua lỗi, giữ phần thành công. Các nguồn bị loại trước bước thực thi được báo riêng.
+- Tùy chọn lưu ánh xạ ghi vào Project Information; cần Save RVT để giữ qua phiên.
+- Kích thước, đường tim và góc tiết diện được kiểm tra khi tạo. System Name IFC lưu trong Comments/dữ liệu theo dõi, không ép tên hệ thống tự sinh của Revit.
+
+4. NỐI FITTING / MIỆNG GIÓ
+- Mặc định tắt. Nếu bật: thử elbow, transition, tee hoặc nối trực tiếp đầu cùng tiết diện theo Routing Preferences.
+- Tee cần ba đầu gặp nhau, không tự chia ống giữa đoạn. Chỉ xét duct thành công trong lượt hiện tại.
+- Khoảng hở fitting từ 1–1000 mm; tăng giới hạn cho phép Revit trim/extend đầu ống khi nối elbow/transition. Không thêm đoạn ống thẳng bắc cầu.
+- Duct nối nhau phải cùng System Type và System Name IFC; nút mơ hồ/thiếu family/routing được báo lỗi.
+- Có thể nối miệng gió native trong model chính tại đầu ống trong 1 mm nếu khớp kích thước, hướng và phân loại HVAC.
+- Không tái tạo toàn bộ fitting IFC hoặc bảo đảm mạng MEP kín. Lỗi nối tuân theo chính sách hoàn tác/giữ thành công đã chọn.
+
+5. CẬP NHẬT IFC VÀ BÁO CÁO
+- Reload cùng link, chọn Category Ducts, bấm Xem trước cập nhật IFC, kiểm tra thay đổi và chọn từng dòng.
+- Theo dõi bằng link UniqueId + IFC GUID. Chỉ cập nhật duct có snapshot, chưa sửa tay, chưa ghim và chưa nối mạng.
+- Không tự xử lý nguồn bị xóa/đổi GUID hoặc link instance được thay mới; duct cũ chưa có snapshot cần xử lý thủ công.
+- Báo cáo có nguồn, IFC GUID, ID đích, trạng thái, lý do; xuất CSV UTF-8. Có thể chọn các duct thành công trong cửa sổ báo cáo của lượt hiện tại.
+- Các lần cập nhật giữ nguyên nhóm lượt tạo ban đầu. Báo cáo chi tiết từng lần cần xuất CSV.
+- Zoom/chọn/cô lập 3D đóng hộp thoại để thao tác trong model; cô lập tạo view 3D mới, cắt vùng quanh nguồn và isolate link cùng duct tương ứng.
+
+6. AIR TERMINAL
+- Chọn Category Air Terminals và các dòng cần tạo, chọn Family/Type, Level, góc xoay.
+- Family có host yêu cầu chọn mặt phẳng trong model chính; điểm nguồn được chiếu lên mặt host, nằm ngoài mặt thì hủy lượt.
+- Dùng LocationPoint hoặc tâm bounding box. Không tự sao chép hướng hình học IFC; dùng hướng family và góc người dùng nhập.
+- Giữ IFC gốc; tạo family mới và lưu thông tin nguồn. Bước này không tự nối mạng.
+
+7. PHẠM VI KIỂM TRA
+- Tool có sửa model: tạo/cập nhật Duct, tạo Air Terminal, nối connector/fitting, lưu ánh xạ và tạo view kiểm tra.
+- Build, test logic và WPF ngoài Revit đã được kiểm tra theo CHANGELOG.md.
+- Chưa nghiệm thu thao tác model thực trong Revit: cần thử tạo/cập nhật, link xoay/dịch, host, routing, worksharing, rollback và Undo trên RVT thử nghiệm.

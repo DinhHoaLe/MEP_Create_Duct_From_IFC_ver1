@@ -36,7 +36,7 @@ namespace IFCInfo
                     var link = doc.GetElement(new ElementId(option.Id)) as RevitLinkInstance;
                     if (link?.GetLinkDocument() == null)
                         throw new InvalidOperationException("Link chưa được load.");
-                    CategoryReader.Configure(dialog, link.GetLinkDocument(), option.IfcPath);
+                    CategoryReader.Configure(dialog, link.GetLinkDocument(), option);
                     DuctWorkflow.Configure(dialog, doc, link);
                     selectedLink = link;
                 };
@@ -45,11 +45,6 @@ namespace IFCInfo
                 dialog.ShowDialog();
                 if (selectedLink != null)
                 {
-                    if (dialog.RunSelection != null)
-                    {
-                        var ids=dialog.RunSelection.Select(id=>new ElementId(id)).Where(id=>doc.GetElement(id)!=null).ToList();
-                        uiDoc.Selection.SetElementIds(ids); if (ids.Count>0) uiDoc.ShowElements(ids); return Result.Succeeded;
-                    }
                     if (dialog.NavigationRow != null)
                     {
                         DuctNavigation.Execute(uiDoc, selectedLink, dialog.NavigationRow, dialog.NavigationAction);

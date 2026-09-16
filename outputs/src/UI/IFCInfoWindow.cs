@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.ComponentModel;
@@ -16,8 +16,6 @@ namespace IFCInfo
         public AirTerminalRow NavigationRow { get; private set; }
         public string NavigationAction { get; private set; }
         public Func<List<AirTerminalRow>, DuctRequest> PrepareUpdates { get; set; }
-        public Dictionary<string,List<long>> SavedDuctRuns { get; set; } = new Dictionary<string,List<long>>();
-        public List<long> RunSelection { get; private set; }
         public List<LinkOption> Links { get; set; } = new List<LinkOption>();
         public LinkOption SelectedLink
         {
@@ -438,14 +436,6 @@ namespace IFCInfo
                     catch (Exception ex) { feedback.Text = ex.Message; }
                 };
                 selectionBar.Children.Add(update);
-                if (SavedDuctRuns.Count>0)
-                {
-                    var runs=new ComboBox { ItemsSource=SavedDuctRuns.Keys.OrderByDescending(k=>k).ToList(),Width=280,Margin=new Thickness(4),SelectedIndex=0 };
-                    selectionBar.Children.Add(runs);
-                    var chooseRun=Button("Chọn duct của lượt đã lưu",false);
-                    chooseRun.Click+=(s,e)=> { if (runs.SelectedItem!=null) { RunSelection=SavedDuctRuns[(string)runs.SelectedItem]; Close(); } };
-                    selectionBar.Children.Add(chooseRun);
-                }
             }
             panel.Children.Add(selectionBar);
             panel.Children.Add(table);

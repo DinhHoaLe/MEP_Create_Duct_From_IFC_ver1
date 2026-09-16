@@ -26,7 +26,7 @@ Các đường dẫn trên tính từ `src/`.
 | Màu sắc, icon, dropdown, thanh bước | `UI/UiDesign.cs` |
 | Chọn type và ánh xạ hệ thống trước khi tạo ống | `UI/DuctCreationWindow.cs` |
 | Chọn family / Level để tạo miệng gió | `UI/AirTerminalReplacementWindow.cs` |
-| Đọc IFC2X3, đơn vị, hệ thống, kích thước | `Ifc/IfcSourceReader.cs` |
+| Đọc IFC2X3/IFC4, đơn vị, hệ thống, kích thước | `Ifc/IfcSourceReader.cs` |
 | Chuẩn bị và kiểm tra danh sách ống sẽ tạo | `Services/Ducts/DuctWorkflow.cs` |
 | Duct đã tồn tại ở vị trí nguồn hay chưa | `Services/Ducts/DuctExistenceChecker.cs` |
 | Thuật toán trùng toàn bộ / một phần đường tim, độc lập Revit | `Services/Ducts/DuctCoverage.cs` |
@@ -76,10 +76,10 @@ flowchart TD
 - Tạo Duct: dung sai hình học giữ nguyên `0.002 feet` (khoảng 0,6 mm).
 - Cột đối chiếu Duct: so đường tim và kích thước với sai số `1 mm`, kiểm tra System Type đích khi xác định được. Xem `DUCT_COMPARISON.md` về trạng thái và giới hạn.
 - `DuctWorkflow.Configure` phải chạy sau `CategoryReader.Configure`: workflow bổ sung bước kiểm tra tồn tại vào callback đọc Category.
-- Thay đổi lần này là tổ chức lại mã, không thay đổi quy tắc tạo ống hoặc giao diện.
+- CategoryReader giữ đường dẫn IFC đã chọn trên LinkOption của phiên; DuctCreationWindow chỉ kiểm tra và lưu ánh xạ cho các dòng Include=true.
 - Project chỉ compile `src/**/*.cs`. Bản mã cũ được chuyển sang thư mục backup trong `work/`, tránh có hai bản dễ nhầm.
 
-## Kiểm tra đã chạy
+## Kết quả lịch sử trước bản sửa 16/09/2026
 
 - Build Release: 0 lỗi, 0 cảnh báo.
 - Giao diện: dropdown link/Category, chuyển bước, đổi link, link chưa load, cột trạng thái và dữ liệu xuất.
@@ -88,3 +88,6 @@ flowchart TD
 - Thuật toán đường tim: kiểm tra nhiều đoạn liên tiếp phủ đủ chiều dài.
 - 24 file class cấp cao có tên file trùng tên class.
 - Chưa kiểm thử transaction tạo phần tử trực tiếp trong Revit sau refactor.
+
+Kết quả kiểm tra bản hiện tại xem CHANGELOG.md. DuctPlanItem phát PropertyChanged cho Include để cập nhật số lượng chọn. UiPreview dùng ProjectReference tới IFCInfo.csproj; Test-DuctUi.ps1 kiểm tra tạo/cập nhật ngoài Revit.
+

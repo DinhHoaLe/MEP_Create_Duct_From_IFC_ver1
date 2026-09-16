@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
@@ -14,9 +14,6 @@ namespace IFCInfo
     {
         public static void Configure(IFCInfoWindow window, Document doc, RevitLinkInstance link)
         {
-            window.SavedDuctRuns = new FilteredElementCollector(doc).OfClass(typeof(Duct)).Cast<Duct>()
-                .Select(d=>new { Duct=d,Run=DuctRevision.Get(d,"Run") }).Where(x=>!string.IsNullOrEmpty(x.Run))
-                .GroupBy(x=>x.Run).ToDictionary(g=>g.Key,g=>g.Select(x=>x.Duct.Id.Value).ToList());
             var loadCategory = window.LoadCategory;
             window.LoadCategory = category =>
             {
