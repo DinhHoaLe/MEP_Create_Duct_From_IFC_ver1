@@ -1,4 +1,9 @@
 $ErrorActionPreference='Stop'
+if ([IntPtr]::Size -ne 8) {
+    & "$env:WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath
+    if ($LASTEXITCODE -ne 0) { throw '64-bit Revit release verification failed' }
+    return
+}
 [void][Reflection.Assembly]::LoadFrom('C:/Program Files/Autodesk/Revit 2023/RevitAPI.dll')
 $published=Resolve-Path "$PSScriptRoot/../IFCInfo.dll"
 $built=Resolve-Path "$PSScriptRoot/../bin/Release/net48/IFCInfo.dll"

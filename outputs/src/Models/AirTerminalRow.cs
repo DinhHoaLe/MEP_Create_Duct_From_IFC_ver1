@@ -6,6 +6,7 @@ namespace IFCInfo
     /// <summary>Một dòng dữ liệu MEP trong bảng, dùng chung cho Duct và Air Terminal.</summary>
     public sealed class AirTerminalRow : INotifyPropertyChanged
     {
+        public long NumericElementId => long.TryParse(ElementId,out long id) ? id : long.MaxValue;
         private bool selected;
         public bool IsSelected
         {

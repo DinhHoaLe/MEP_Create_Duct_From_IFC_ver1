@@ -41,6 +41,7 @@ internal static class Program
                 TestFamilyLoader();
                 TestProperties();
                 TestCheckedProperties();
+                TestExports();
                 TestMainReviewLayout();
                 TestIndependentMinimize();
                 TestNativeCurves();
@@ -192,6 +193,17 @@ internal static class Program
             Assert(((Button)nodes.Single(n=>n.Name=="CreateNative")).IsEnabled,"Valid native curve must be enabled: "+pair.Item1);
             Assert(((ComboBox)nodes.Single(n=>n.Name=="TargetSystem")).IsEnabled==(pair.Item1=="Pipe"),"Only Pipe requires piping system");
             window.Close();
+            var curve=new CurveCreationWindow(new List<AirTerminalRow> {new AirTerminalRow {ElementId="1",SystemType="Water"}},
+                new List<ReplacementTypeOption> {type},new List<ReplacementLevelOption> {new ReplacementLevelOption {Id=1,Label="L1"}},
+                systems,pair.Item2,pair.Item1) {Opacity=0,ShowInTaskbar=false};
+            var curveNodes=Descendants(curve).OfType<FrameworkElement>().ToList();
+            Assert(curveNodes.OfType<ComboBox>().All(c=>c.MinHeight==36),"Curve settings must use compact fields");
+            Assert(curveNodes.OfType<ComboBox>().Count()==(pair.Item1=="Pipe"?4:3),"Only Pipe has a system mapping in curve step 3");
+            curve.Loaded+=(s,e)=>curve.Dispatcher.BeginInvoke(new Action(()=>
+                curveNodes.OfType<Button>().Single(b=>b.Name=="CreateCurve").RaiseEvent(new RoutedEventArgs(Button.ClickEvent))));
+            curve.ShowDialog();
+            Assert(curve.Request!=null && curve.Request.Kind==pair.Item1 && curve.Request.SourceCategoryId==pair.Item2,"Curve step 3 must preserve kind and category");
+            Assert(curve.Request.SystemTypeId==(pair.Item1=="Pipe"?20:0),"Only Pipe must submit a system type");
         }
     }
 
@@ -273,6 +285,14 @@ internal static class Program
             sortHeaders.Any(h=>h.StartsWith("Element ID")) && sortHeaders.Any(h=>h.StartsWith("Phần tử")) &&
             !sortHeaders.Any(h=>h.StartsWith("System")),"Sort menu must follow visible table columns");
         sort.ContextMenu.IsOpen=false;
+        row.ElementId="10"; other.ElementId="2";
+        sort.ContextMenu.Items.OfType<MenuItem>().Single(i=>(string)i.Header=="Element ID ↑").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert(source.Items[0]==other,"IDs must sort numerically, with 2 before 10");
+        row.IsSelected=true; other.IsSelected=true;
+        filter.ContextMenu.Items.OfType<MenuItem>().Single(i=>(string)i.Header=="Đang tích chọn").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        row.IsSelected=false;
+        page.Dispatcher.Invoke(new Action(()=>{}),DispatcherPriority.ContextIdle);
+        Assert(source.Items.Count==1 && source.Items[0]==other,"Selected filter must refresh after unchecking a row");
         main.Close();
     }
 
@@ -295,6 +315,29 @@ internal static class Program
         Assert(!IsWindowEnabled(ownerHandle),"Restoring the tool must restore modal owner behavior");
         EnableWindow(ownerHandle,true);
         tool.Close(); owner.Close();
+    }
+
+    private static void TestExports()
+    {
+        var rows=new List<AirTerminalRow> {
+            new AirTerminalRow { ElementId="2",Name="Ống \"A\"",Elevation="100",IsSelected=true },
+            new AirTerminalRow { ElementId="10",Name="=1+1",Elevation="200",IsSelected=true },
+            new AirTerminalRow { ElementId="99",Name="Excluded" } };
+        string folder=Path.Combine(Path.GetTempPath(),"IfcExportTests-"+Guid.NewGuid());
+        Directory.CreateDirectory(folder);
+        try {
+            for(int format=1;format<=4;format++) {
+                string path=Path.Combine(folder,"export-"+format);
+                IfcSelectionExport.Export(path,rows,"source.ifc","Pipes",format);
+                string content=File.ReadAllText(path);
+                Assert(content.Contains("100") && content.Contains("200") && !content.Contains("Excluded") && !content.Contains("<varies>"),"Every export format must preserve individual selected values");
+                if(format==2) Assert(content.Contains("'=1+1"),"TSV must escape spreadsheet formulas");
+                if(format==4) {
+                    var xml=new System.Xml.XmlDocument();xml.Load(path);
+                    Assert(xml.SelectNodes("/IfcElements/Element").Count==2,"XML must contain two separate elements");
+                }
+            }
+        } finally { foreach(string path in Directory.GetFiles(folder)) File.Delete(path); Directory.Delete(folder); }
     }
 
     private static void TestCheckedProperties()

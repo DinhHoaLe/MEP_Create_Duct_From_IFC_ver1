@@ -106,7 +106,7 @@ namespace IFCInfo
             }
             return grid;
         }
-        internal static ComboBox Field(StackPanel body, string title, string description, string placeholder, bool category)
+        internal static ComboBox Field(StackPanel body, string title, string description, string placeholder, bool category, bool compact=false)
         {
             var grid = new Grid { Margin = new Thickness(0, 24, 0, 0) };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
@@ -155,6 +155,18 @@ namespace IFCInfo
  <Setter Property='ItemContainerStyle'><Setter.Value><Style TargetType='ComboBoxItem'><Setter Property='Padding' Value='12,9'/><Setter Property='HorizontalContentAlignment' Value='Stretch'/></Style></Setter.Value></Setter>
 </Style>");
             field.Children.Add(combo);
+            if(compact)
+            {
+                grid.Margin=new Thickness(0,10,0,0);
+                grid.ColumnDefinitions[0].Width=new GridLength(0);
+                grid.Children[0].Visibility=Visibility.Collapsed;
+                label.FontSize=14;
+                label.Margin=new Thickness(0,0,0,5);
+                hint.Visibility=Visibility.Collapsed;
+                combo.ToolTip=description;
+                combo.MinHeight=36; combo.FontSize=14;
+                combo.Padding=new Thickness(10,6,32,6);
+            }
             body.Children.Add(grid);
             return combo;
         }

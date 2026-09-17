@@ -19,8 +19,7 @@ namespace IFCInfo
             var records=data.Select(r=>names.Select(n=>r.ContainsKey(n)?r[n]:"").ToArray()).ToList();
             if(format==2)
             {
-                Func<string,string> cell=value=>"\""+(value??"").Replace("\"","\"\"")+"\"";
-                File.WriteAllLines(path,new[] {string.Join("\t",names)}.Concat(records.Select(r=>string.Join("\t",r.Select(cell)))),new UTF8Encoding(true));
+                File.WriteAllLines(path,new[] {string.Join("\t",names.Select(DuctRunRow.CsvCell))}.Concat(records.Select(r=>string.Join("\t",r.Select(DuctRunRow.CsvCell)))),new UTF8Encoding(true));
             }
             else if(format==3)
             {

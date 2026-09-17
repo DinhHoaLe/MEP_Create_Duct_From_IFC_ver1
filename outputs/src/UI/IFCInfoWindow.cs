@@ -297,9 +297,9 @@ namespace IFCInfo
                     feedback.Text = "Hãy tích chọn ít nhất một phần tử nguồn.";
                     return;
                 }
-                if (SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves || SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_CableTray)
+                if (SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves || SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_CableTray || SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_Conduit)
                 {
-                    string kind=SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves?"Pipe":"CableTray";
+                    string kind=SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves?"Pipe":SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_Conduit?"Conduit":"CableTray";
                     var curveDialog=new CurveCreationWindow(selected,ReplacementTypes,ReplacementLevels,ReplacementSystems,SelectedCategory.Id,kind) { Owner=this };
                     if(curveDialog.ShowDialog()==true) { Replacement=curveDialog.Request; Close(); }
                     return;
@@ -502,12 +502,13 @@ namespace IFCInfo
                 properties.ShowSources(checkedRows.Count>0 ? checkedRows : table.SelectedItems.Cast<AirTerminalRow>().ToList());
             };
             bool refreshPending=false;
+            Action refreshSelectionView=()=>{};
             bool previewPending=false;
             Action queueProperties=()=>
             {
                 if (refreshPending) return;
                 refreshPending=true;
-                panel.Dispatcher.BeginInvoke(new Action(()=> { refreshPending=false; refreshProperties(); }),
+                panel.Dispatcher.BeginInvoke(new Action(()=> { refreshSelectionView(); refreshProperties(); refreshPending=false; }),
                     System.Windows.Threading.DispatcherPriority.DataBind);
             };
             Action queuePreview=()=>
@@ -589,6 +590,11 @@ namespace IFCInfo
             searchLayout.Children.Add(placeholder);
             string filterMode="all";
             string filterExistence=null;
+            refreshSelectionView=()=>
+            {
+                if (!sourceView.IsEditingItem && !sourceView.IsAddingNew &&
+                    (filterMode!="all" || sourceView.SortDescriptions.Any(d=>d.PropertyName=="IsSelected"))) sourceView.Refresh();
+            };
             Action applyFilter=()=>
             {
                 string query=search.Text.Trim();
@@ -631,7 +637,7 @@ namespace IFCInfo
                 var menu=new ContextMenu();
                 var fields=new List<KeyValuePair<string,string>> {
                     new KeyValuePair<string,string>("Chọn","IsSelected"),
-                    new KeyValuePair<string,string>("Element ID","ElementId"),
+                    new KeyValuePair<string,string>("Element ID","NumericElementId"),
                     new KeyValuePair<string,string>("Phần tử","Name") };
                 if (CanCreateDucts) fields.Insert(1,new KeyValuePair<string,string>("Đối chiếu Duct","DuctExistence"));
                 foreach(var field in fields)

@@ -65,14 +65,14 @@ namespace IFCInfo
             {
                 var groupItems = items.Where(item => item.Round == isRound).ToList();
                 if (groupItems.Count == 0) continue;
-                var settings = new StackPanel { Margin = new Thickness(22,18,22,22) };
+                var settings = new StackPanel { Margin = new Thickness(16,12,16,14) };
                 body.Children.Add(new Border { Child = settings, Background = System.Windows.Media.Brushes.White,
                     CornerRadius = new CornerRadius(14), BorderBrush = IFCInfoWindow.Brush("#DFE9F6"),
                     BorderThickness = new Thickness(1), Margin = new Thickness(0,0,0,16) });
                 var groupTitle = IFCInfoWindow.Text((isRound ? "Ống gió tròn" : "Ống gió chữ nhật") + " · " + groupItems.Count + " đoạn", 20, "#102A50");
                 groupTitle.FontWeight = FontWeights.SemiBold;
                 settings.Children.Add(groupTitle);
-                var typeBox = UiDesign.Field(settings, "Duct Type", "Chọn loại ống cho nhóm này", "Chọn Duct Type...", false);
+                var typeBox = UiDesign.Field(settings, "Duct Type", "Chọn loại ống cho nhóm này", "Chọn Duct Type...", false,true);
                 var availableTypes = isRound ? roundTypes : rectangularTypes;
                 typeBox.ItemsSource = availableTypes;
                 if (availableTypes.Count == 1) typeBox.SelectedIndex = 0;
@@ -85,7 +85,7 @@ namespace IFCInfo
                     var box = UiDesign.Field(settings,
                         "System Type: " + (string.IsNullOrEmpty(sourceType) ? "Không có thông tin" : sourceType),
                         sourceGroup.Count() + " đoạn · Chọn System Type tương ứng trong Revit",
-                        "Chọn System Type...", true);
+                        "Chọn System Type...", true,true);
                     box.ItemsSource = systems;
                     box.SelectedItem = systems.FirstOrDefault(type => string.Equals(type.Name, sourceType, StringComparison.OrdinalIgnoreCase));
                     mapping.Add(DuctRequest.SystemKey(isRound, sourceType), box);
