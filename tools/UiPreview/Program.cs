@@ -3,16 +3,30 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Media.Media3D;
 using System.Windows.Threading;
 using IFCInfo;
 
 internal static class Program
 {
     private static int checks;
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowEnabled(IntPtr window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnableWindow(IntPtr window, [MarshalAs(UnmanagedType.Bool)] bool enable);
 
     [STAThread]
     private static int Main(string[] args)
@@ -27,6 +41,8 @@ internal static class Program
                 TestFamilyLoader();
                 TestProperties();
                 TestCheckedProperties();
+                TestMainReviewLayout();
+                TestIndependentMinimize();
                 TestNativeCurves();
                 Console.WriteLine("PASS: " + checks + " WPF regression checks.");
                 return 0;
@@ -53,6 +69,26 @@ internal static class Program
                 DuctSource=new IfcTerminalSource { WidthMm=500,HeightMm=250,LengthMm=2400 } });
             var propertyWindow=new Window { Content=propertyPanel };
             Render(propertyWindow,output,"ifc-properties.png",350,480); propertyWindow.Close();
+            var reviewMain=new IFCInfoWindow {
+                AirTerminalCount=2,CanCreateDucts=true,
+                AirTerminals=new List<AirTerminalRow> {
+                    new AirTerminalRow { ElementId="123",Name="Rectangular Duct",IfcGuid="ifc-source-guid",
+                        SystemType="Supply Air",SystemName="SA-01",Elevation="3200",
+                        DuctSource=new IfcTerminalSource { WidthMm=500,HeightMm=250,LengthMm=2400 } },
+                    new AirTerminalRow { ElementId="124",Name="Round Duct",IfcGuid="ifc-round-guid",
+                        SystemType="Return Air",SystemName="RA-01",Elevation="3300",
+                        DuctSource=new IfcTerminalSource { DiameterMm=300,LengthMm=1800 } }
+                }
+            };
+            var reviewPage=(FrameworkElement)typeof(IFCInfoWindow).GetMethod("CountPage",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(reviewMain,null);
+            var reviewViewer=Descendants(reviewPage).OfType<IfcObjectViewer>().Single();
+            reviewViewer.ShowModel(PreviewBox());
+            Descendants(reviewPage).OfType<Button>().Single(b=>(b.ToolTip as string)=="Zoom tới nguồn IFC").Visibility=Visibility.Visible;
+            var reviewWindow=new Window { Content=reviewPage };
+            Render(reviewWindow,output,"ifc-review-viewer.png",1450,620);
+            reviewViewer.ShowMultipleSelection(2);
+            Render(reviewWindow,output,"ifc-review-multiple.png",1450,620);
+            reviewWindow.Close(); reviewMain.Close();
             var items = new List<DuctPlanItem> { Item("123", false, "Supply Air", "Level 1") };
             var settings = Settings(items, false, Choices());
             Render(settings, output, "duct-settings.png", 900, 690);
@@ -82,6 +118,22 @@ internal static class Program
     private static List<DuctChoice> Choices() => new List<DuctChoice> {
         new DuctChoice { Id = 7, Name = "Supply Air" }
     };
+
+    private static IfcPreviewMesh PreviewBox()
+    {
+        var model=new IfcPreviewMesh { ElementId=123,Name="Rectangular Duct" };
+        foreach(double x in new[] {-4.0,4.0})
+        foreach(double y in new[] {-1.0,1.0})
+        foreach(double z in new[] {-0.6,0.6})
+        {
+            model.Points.Add(new Point3D(x,y,z));
+            var normal=new Vector3D(x,y,z); normal.Normalize(); model.Normals.Add(normal);
+        }
+        model.Indices.AddRange(new[] {
+            0,2,3,0,3,1,4,5,7,4,7,6,0,1,5,0,5,4,
+            2,6,7,2,7,3,0,4,6,0,6,2,1,3,7,1,7,5 });
+        return model;
+    }
 
     private static DuctPlanItem Item(string id, bool round, string system, string level) => new DuctPlanItem {
         Source = new AirTerminalRow { ElementId = id, IfcGuid = "guid-" + id, SystemType = system },
@@ -170,6 +222,79 @@ internal static class Program
         Assert(!grid.Items.Cast<KeyValuePair<string,string>>().Any(p=>p.Value=="IFC value"),"Changing row must clear previous IFC properties");
         panel.ShowSource(null);
         Assert(grid.Items.Count==0,"Clearing active row must clear properties");
+    }
+
+    private static void TestMainReviewLayout()
+    {
+        var main=new IFCInfoWindow();
+        Assert(main.ShowInTaskbar,"The tool needs its own taskbar entry so it can minimize independently from Revit");
+        var row=new AirTerminalRow { ElementId="123",Name="Duct",SystemType="Supply",SystemName="SA",Elevation="3200" };
+        var other=new AirTerminalRow { ElementId="124",Name="Duct 2",SystemType="Return",SystemName="RA",Elevation="3300" };
+        main.AirTerminals=new List<AirTerminalRow> { row,other };
+        main.AirTerminalCount=2;
+        main.CanCreateDucts=true;
+        int navigations=0;
+        main.NavigateSource=(selected,action)=> { if(selected==row && action=="Zoom tới nguồn IFC") navigations++; };
+        var page=(FrameworkElement)typeof(IFCInfoWindow).GetMethod("CountPage",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(main,null);
+        var grids=Descendants(page).OfType<DataGrid>().ToList();
+        var source=grids.Single(g=>g.Name!="IfcPropertyValues");
+        var headers=source.Columns.Select(c=>c.Header as string).ToList();
+        Assert(!headers.Contains("System Type") && !headers.Contains("System Name") && !headers.Contains("Cao độ (mm)"),
+            "Main source table must leave system and elevation details to Properties");
+        source.SelectedItem=row;
+        var buttons=Descendants(main).OfType<Button>().Concat(Descendants(page).OfType<Button>()).Distinct().ToList();
+        var zoom=buttons.Single(b=>(b.ToolTip as string)=="Zoom tới nguồn IFC");
+        Assert(zoom.IsEnabled,"Selecting a source row must enable IFC zoom review");
+        zoom.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(navigations==1 && main.NavigationRow==null,"IFC zoom callback must keep the tool open");
+        Assert(!buttons.Any(b=>(b.Content as string)=="Đóng"),"Main window must rely on the title-bar close button");
+        var back=buttons.Single(b=>(b.Content as string)=="← Quay lại");
+        Assert(back.Parent is WrapPanel && Grid.GetColumn((WrapPanel)back.Parent)==0,"Back button must stay in the left footer");
+        var propertyGrid=grids.Single(g=>g.Name=="IfcPropertyValues");
+        Assert(propertyGrid.Items.GroupDescriptions.Count>0,"IFC properties must be grouped like Revit Properties");
+        var viewer=Descendants(page).OfType<IfcObjectViewer>().Single();
+        Assert(zoom.Parent is StackPanel && Descendants(viewer).Contains(zoom),"IFC zoom icon must sit in the viewer header");
+        Assert(double.IsNaN(viewer.Height) && viewer.VerticalAlignment==VerticalAlignment.Stretch,
+            "Viewer height must stretch with the table and Properties");
+        source.SelectedItems.Add(other);
+        Assert(!zoom.IsEnabled && viewer.StatusText.Contains("nhiều đối tượng"),"Multiple selections must clear the viewer and disable IFC zoom");
+        Assert(Descendants(viewer).OfType<System.Windows.Shapes.Path>().Any(p=>p.Width==72 && p.Visibility==Visibility.Visible),
+            "Multiple selections must show a centered viewer symbol instead of an empty panel");
+        var filter=buttons.Single(b=>b.Name=="FilterSources");
+        filter.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var filterHeaders=filter.ContextMenu.Items.OfType<MenuItem>().Select(i=>i.Header as string).ToList();
+        Assert(filterHeaders.Contains("Đối chiếu Duct") && !filterHeaders.Contains("System Type"),
+            "Filter menu must follow visible table columns");
+        filter.ContextMenu.IsOpen=false;
+        var sort=buttons.Single(b=>b.Name=="SortSources");
+        sort.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var sortHeaders=sort.ContextMenu.Items.OfType<MenuItem>().Select(i=>i.Header as string).ToList();
+        Assert(sortHeaders.Any(h=>h.StartsWith("Chọn")) && sortHeaders.Any(h=>h.StartsWith("Đối chiếu Duct")) &&
+            sortHeaders.Any(h=>h.StartsWith("Element ID")) && sortHeaders.Any(h=>h.StartsWith("Phần tử")) &&
+            !sortHeaders.Any(h=>h.StartsWith("System")),"Sort menu must follow visible table columns");
+        sort.ContextMenu.IsOpen=false;
+        main.Close();
+    }
+
+    private static void TestIndependentMinimize()
+    {
+        var owner=new Window { Width=200,Height=120,Opacity=0,ShowInTaskbar=false };
+        owner.Show();
+        var ownerHandle=new WindowInteropHelper(owner).Handle;
+        var tool=new IFCInfoWindow { Width=640,Height=540,Opacity=0 };
+        new WindowInteropHelper(tool).Owner=ownerHandle;
+        tool.Show();
+        var toolHandle=new WindowInteropHelper(tool).Handle;
+        EnableWindow(ownerHandle,false); // Simulate the native lock applied by ShowDialog.
+        SendMessage(toolHandle,0x0112,new IntPtr(0xF020),IntPtr.Zero);
+        tool.Dispatcher.Invoke(new Action(()=>{}),DispatcherPriority.ApplicationIdle);
+        Assert(tool.WindowState==WindowState.Minimized,"The minimize command must minimize only the tool");
+        Assert(IsWindowEnabled(ownerHandle),"Minimizing the tool must unlock its Revit owner for interaction");
+        tool.WindowState=WindowState.Normal;
+        tool.Dispatcher.Invoke(new Action(()=>{}),DispatcherPriority.ApplicationIdle);
+        Assert(!IsWindowEnabled(ownerHandle),"Restoring the tool must restore modal owner behavior");
+        EnableWindow(ownerHandle,true);
+        tool.Close(); owner.Close();
     }
 
     private static void TestCheckedProperties()

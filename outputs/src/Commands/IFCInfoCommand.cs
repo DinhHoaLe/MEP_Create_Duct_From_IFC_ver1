@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
@@ -41,6 +41,12 @@ namespace IFCInfo
                     selectedLink = link;
                 };
                 PlacementCatalog.Configure(dialog, doc);
+                dialog.NavigateSource = (row, action) =>
+                {
+                    if (selectedLink == null)
+                        throw new InvalidOperationException("Chưa chọn IFC link đã load.");
+                    DuctNavigation.Execute(uiDoc, selectedLink, row, action);
+                };
                 new System.Windows.Interop.WindowInteropHelper(dialog).Owner = commandData.Application.MainWindowHandle;
                 dialog.ShowDialog();
                 if (selectedLink != null)

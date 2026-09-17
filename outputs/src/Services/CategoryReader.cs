@@ -23,6 +23,16 @@ namespace IFCInfo
                     .GroupBy(element => element.Category.Id.Number())
                     .Select(group => new CategoryOption { Id = group.Key, Name = group.First().Category.Name })
                     .OrderBy(category => category.Name).ToList();
+            var previewCache=new Dictionary<long,IfcPreviewMesh>();
+            window.LoadPreview = row =>
+            {
+                if (row==null || !long.TryParse(row.ElementId,out long id)) return null;
+                if (previewCache.TryGetValue(id,out var cached)) return cached;
+                if (previewCache.Count>=24) previewCache.Clear();
+                var preview=IfcPreviewGeometryBuilder.Build(linkedDoc.GetElement(ElementIds.Create(id)));
+                if (preview!=null) previewCache[id]=preview;
+                return preview;
+            };
             window.LoadCategory = category => SetCategoryCount(window, linkedDoc, linkOption, category);
         }
 

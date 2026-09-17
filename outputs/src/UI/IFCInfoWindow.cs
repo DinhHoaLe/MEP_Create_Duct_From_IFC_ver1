@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Text;
 using System.ComponentModel;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 
 namespace IFCInfo
@@ -15,8 +17,27 @@ namespace IFCInfo
         private readonly TextBlock feedback;
         private readonly Button zoomSource;
         private AirTerminalRow focusedSource;
+        private HwndSource nativeSource;
+        private IntPtr nativeOwner;
+        private bool detachedForMinimize;
+        private const int WmSysCommand = 0x0112;
+        private const int ScMinimize = 0xF020;
+        private const int GwlHwndParent = -8;
+        private const int SwMinimize = 6;
+
+        [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+        private static extern IntPtr SetWindowLongPtr(IntPtr window, int index, IntPtr value);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ShowWindow(IntPtr window, int command);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool EnableWindow(IntPtr window, [MarshalAs(UnmanagedType.Bool)] bool enable);
         public AirTerminalRow NavigationRow { get; private set; }
         public string NavigationAction { get; private set; }
+        public Action<AirTerminalRow,string> NavigateSource { get; set; }
         public Func<List<AirTerminalRow>, DuctRequest> PrepareUpdates { get; set; }
         public List<LinkOption> Links { get; set; } = new List<LinkOption>();
         public LinkOption SelectedLink
@@ -36,6 +57,7 @@ namespace IFCInfo
         {
             get; set;
         }
+        public Func<AirTerminalRow, IfcPreviewMesh> LoadPreview { get; set; }
         public bool CanCreateDucts
         {
             get; set;
@@ -97,13 +119,18 @@ namespace IFCInfo
             MaxWidth = SystemParameters.WorkArea.Width;
             MaxHeight = SystemParameters.WorkArea.Height;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
-            ShowInTaskbar = false;
+            // Keep a separate taskbar entry so the tool can be restored without
+            // minimizing or restoring Revit along with it.
+            ShowInTaskbar = true;
             FontFamily = new FontFamily("Segoe UI");
             FontSize = 14;
             Background = UiDesign.Background;
             Foreground = Brush("#102A50");
             UseLayoutRounding = true;
             TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
+            SourceInitialized += OnSourceInitialized;
+            StateChanged += OnWindowStateChanged;
+            Closed += OnWindowClosed;
             var root = new DockPanel { Background = Background };
             Content = root;
             var header = new Grid { Margin = new Thickness(38, 34, 38, 28) };
@@ -127,6 +154,7 @@ namespace IFCInfo
             DockPanel.SetDock(header, Dock.Top);
             root.Children.Add(header);
             var footer = new Grid { Margin = new Thickness(38, 20, 38, 26) };
+            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             footer.ColumnDefinitions.Add(new ColumnDefinition());
             footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             footer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -137,35 +165,34 @@ namespace IFCInfo
             feedback = Text("Chọn IFC link và Category để tiếp tục.", 14, "#647FA6");
             feedback.MaxWidth = 310;
             status.Children.Add(feedback);
+            Grid.SetColumn(status, 1);
             footer.Children.Add(status);
+            var leftButtons = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Left };
+            Grid.SetColumn(leftButtons, 0);
+            footer.Children.Add(leftButtons);
             var buttons = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
-            Grid.SetColumn(buttons, 1);
+            Grid.SetColumn(buttons, 2);
             footer.Children.Add(buttons);
             footer.SizeChanged += (s, e) =>
             {
                 bool compact = footer.ActualWidth < 850 || buttons.DesiredSize.Width > footer.ActualWidth - 300;
-                Grid.SetRow(buttons, compact ? 1 : 0);
-                Grid.SetColumn(buttons, compact ? 0 : 1);
-                Grid.SetColumnSpan(buttons, compact ? 2 : 1);
-                Grid.SetColumnSpan(status, compact ? 2 : 1);
+                Grid.SetRow(status, 0); Grid.SetColumn(status, compact ? 0 : 1); Grid.SetColumnSpan(status, compact ? 3 : 1);
+                Grid.SetRow(leftButtons, compact ? 1 : 0); Grid.SetColumn(leftButtons, 0);
+                Grid.SetRow(buttons, compact ? 1 : 0); Grid.SetColumn(buttons, 2);
             };
             var back = Button("← Quay lại", false);
             back.Visibility = Visibility.Collapsed;
-            buttons.Children.Add(back);
-            zoomSource=Button("Zoom tới nguồn IFC",false);
+            leftButtons.Children.Add(back);
+            zoomSource=IconButton("Zoom tới nguồn IFC",
+                "M10,3 A7,7 0 1 0 10,17 A7,7 0 1 0 10,3 M15,15 L21,21 M10,7 L10,13 M7,10 L13,10");
             zoomSource.Visibility=Visibility.Collapsed; zoomSource.IsEnabled=false;
-            zoomSource.Click+=(s,e)=> { if(focusedSource==null) return; NavigationRow=focusedSource; NavigationAction="Zoom tới nguồn IFC"; Close(); };
-            buttons.Children.Add(zoomSource);
+            zoomSource.Click+=(s,e)=>ZoomToIfcSource(focusedSource);
             var next = Button("Tiếp tục →", true);
             next.IsEnabled = false;
             buttons.Children.Add(next);
             var create = Button("Tạo family →", true);
             create.Visibility = Visibility.Collapsed;
             buttons.Children.Add(create);
-            var close = Button("Đóng", false);
-            close.IsCancel = true;
-            close.Click += (s, e) => Close();
-            buttons.Children.Add(close);
             var body = new StackPanel { Margin = new Thickness(38, 6, 38, 20) };
             var card = new StackPanel { Margin = new Thickness(34, 25, 34, 32) };
             body.Children.Add(new Border
@@ -205,6 +232,7 @@ namespace IFCInfo
                 Categories = new List<CategoryOption>();
                 AirTerminals = new List<AirTerminalRow>();
                 LoadCategory = null;
+                LoadPreview = null;
                 PrepareDucts = null;
                 CanCreateDucts = false;
                 CanReplaceCategory = false;
@@ -383,10 +411,7 @@ namespace IFCInfo
             }
             foreach (var column in new[] {
                 new { Header = "Element ID", Property = "ElementId", Width = 95.0 },
-                new { Header = "Phần tử", Property = "Name", Width = 220.0 },
-                new { Header = "System Type", Property = "SystemType", Width = 150.0 },
-                new { Header = "System Name", Property = "SystemName", Width = 220.0 },
-                new { Header = "Cao độ (mm)", Property = "Elevation", Width = 110.0 } })
+                new { Header = "Phần tử", Property = "Name", Width = 340.0 } })
             {
                 table.Columns.Add(new DataGridTextColumn
                 {
@@ -398,30 +423,55 @@ namespace IFCInfo
                 });
             }
             focusedSource=null; zoomSource.IsEnabled=false;
-            table.CurrentCellChanged+=(s,e)=> { focusedSource=table.CurrentCell.Item as AirTerminalRow; zoomSource.IsEnabled=focusedSource!=null; };
+            IfcObjectViewer previewViewer=null;
+            Action updateFocusedSource=()=>
+            {
+                var selectedRows=AirTerminals.Where(r=>r.IsSelected)
+                    .Concat(table.SelectedItems.Cast<AirTerminalRow>()).Distinct().ToList();
+                focusedSource=selectedRows.Count==1 ? selectedRows[0] : null;
+                zoomSource.IsEnabled=focusedSource!=null;
+                if (previewViewer!=null)
+                {
+                    if (selectedRows.Count>1)
+                    {
+                        previewViewer.ShowMultipleSelection(selectedRows.Count);
+                        return;
+                    }
+                    try { previewViewer.ShowModel(focusedSource==null ? null : LoadPreview?.Invoke(focusedSource)); }
+                    catch (Exception ex) { previewViewer.Clear("Không đọc được hình học preview: "+ex.Message); feedback.Text="Không đọc được hình học preview: "+ex.Message; }
+                }
+            };
+            table.CurrentCellChanged+=(s,e)=>updateFocusedSource();
+            table.SelectionChanged+=(s,e)=>updateFocusedSource();
+            table.MouseDoubleClick+=(s,e)=>
+            {
+                updateFocusedSource();
+                ZoomToIfcSource(focusedSource);
+            };
             var details = new Grid();
             details.ColumnDefinitions.Add(new ColumnDefinition());
             details.ColumnDefinitions.Add(new ColumnDefinition { Width=new GridLength(350) });
+            details.ColumnDefinitions.Add(new ColumnDefinition { Width=new GridLength(380) });
             details.RowDefinitions.Add(new RowDefinition { Height=GridLength.Auto });
             details.RowDefinitions.Add(new RowDefinition { Height=GridLength.Auto });
             details.RowDefinitions.Add(new RowDefinition { Height=GridLength.Auto });
             table.Height=380;
             details.RowDefinitions.Add(new RowDefinition { Height=GridLength.Auto });
+            details.RowDefinitions.Add(new RowDefinition { Height=GridLength.Auto });
             var properties=new IfcPropertiesPanel { Height=380, Margin=new Thickness(12,0,0,0) };
+            previewViewer=new IfcObjectViewer { MinHeight=380,Margin=new Thickness(12,0,0,0),VerticalAlignment=VerticalAlignment.Stretch };
+            previewViewer.AddHeaderAction(zoomSource);
             var propertyToolbar=new DockPanel { Margin=new Thickness(12,0,0,8),LastChildFill=true };
-            var copyProperties=Button("⧉",false);
-            copyProperties.ToolTip="Sao chép toàn bộ thuộc tính và giá trị đang hiển thị";
-            copyProperties.Height=40; copyProperties.MinHeight=40;
-            copyProperties.Padding=new Thickness(14,0,14,0);
+            var copyProperties=IconButton("Sao chép thuộc tính",
+                "M8,8 L20,8 20,20 8,20 Z M4,4 L16,4 16,8 M4,4 L4,16 8,16");
             copyProperties.Click+=(s,e)=>
             {
                 try { Clipboard.SetText(properties.AllPropertyValues()); }
                 catch (System.Runtime.InteropServices.ExternalException) { feedback.Text="Clipboard đang bận. Hãy thử sao chép lại."; }
             };
             DockPanel.SetDock(copyProperties,Dock.Right); propertyToolbar.Children.Add(copyProperties);
-            var export=Button("Export",false);
-            export.Height=40; export.MinHeight=40; export.Padding=new Thickness(14,0,14,0); export.FontSize=14;
-            export.ToolTip="Xuất các phần tử đang tích chọn: CSV, TSV, JSON, XML";
+            var export=IconButton("Xuất dữ liệu (CSV, TSV, JSON, XML)",
+                "M12,3 L12,15 M7,10 L12,15 17,10 M5,18 L5,21 19,21 19,18");
             export.Click+=(s,e)=>
             {
                 var selected=AirTerminals.Where(r=>r.IsSelected).ToList();
@@ -442,7 +492,8 @@ namespace IFCInfo
             Grid.SetColumn(propertyToolbar,1); details.Children.Add(propertyToolbar);
             Grid.SetColumn(properties,1);
             Grid.SetRow(table,1); Grid.SetRow(properties,1);
-            details.Children.Add(table); details.Children.Add(properties);
+            Grid.SetColumn(previewViewer,2); Grid.SetRow(previewViewer,0); Grid.SetRowSpan(previewViewer,2);
+            details.Children.Add(table); details.Children.Add(properties); details.Children.Add(previewViewer);
             var propertyRows=AirTerminals.ToList();
             Action refreshProperties=()=>
             {
@@ -451,6 +502,7 @@ namespace IFCInfo
                 properties.ShowSources(checkedRows.Count>0 ? checkedRows : table.SelectedItems.Cast<AirTerminalRow>().ToList());
             };
             bool refreshPending=false;
+            bool previewPending=false;
             Action queueProperties=()=>
             {
                 if (refreshPending) return;
@@ -458,9 +510,16 @@ namespace IFCInfo
                 panel.Dispatcher.BeginInvoke(new Action(()=> { refreshPending=false; refreshProperties(); }),
                     System.Windows.Threading.DispatcherPriority.DataBind);
             };
+            Action queuePreview=()=>
+            {
+                if (previewPending) return;
+                previewPending=true;
+                panel.Dispatcher.BeginInvoke(new Action(()=> { previewPending=false; updateFocusedSource(); }),
+                    System.Windows.Threading.DispatcherPriority.DataBind);
+            };
             PropertyChangedEventHandler checkedChanged=(s,e)=>
             {
-                if (e.PropertyName==nameof(AirTerminalRow.IsSelected)) queueProperties();
+                if (e.PropertyName==nameof(AirTerminalRow.IsSelected)) { queueProperties(); queuePreview(); }
             };
             bool listening=false;
             Action subscribe=()=> { if (listening) return; foreach(var row in propertyRows) row.PropertyChanged+=checkedChanged; listening=true; };
@@ -471,25 +530,41 @@ namespace IFCInfo
             table.SelectionChanged+=(s,e)=>queueProperties();
             details.SizeChanged+=(s,e)=>
             {
-                bool narrow=details.ActualWidth<900;
-                details.ColumnDefinitions[1].Width=narrow ? new GridLength(0) : new GridLength(350);
-                Grid.SetColumn(properties,narrow?0:1); Grid.SetRow(properties,narrow?2:1);
-                properties.Margin=narrow?new Thickness(0,12,0,0):new Thickness(12,0,0,0);
-                Grid.SetColumn(propertyToolbar,narrow?0:1);
-                Grid.SetRow(propertyToolbar,narrow?2:0);
-                Grid.SetRow(properties,narrow?3:1);
+                bool stackProperties=details.ActualWidth<900;
+                bool stackViewer=details.ActualWidth<1250;
+                details.ColumnDefinitions[1].Width=stackProperties ? new GridLength(0) : new GridLength(350);
+                details.ColumnDefinitions[2].Width=stackViewer ? new GridLength(0) : new GridLength(380);
+                Grid.SetColumn(properties,stackProperties?0:1); Grid.SetRow(properties,stackProperties?3:1);
+                properties.Margin=stackProperties?new Thickness(0,0,0,0):new Thickness(12,0,0,0);
+                Grid.SetColumn(propertyToolbar,stackProperties?0:1);
+                Grid.SetRow(propertyToolbar,stackProperties?2:0);
+                if (stackViewer)
+                {
+                    Grid.SetColumn(previewViewer,0); Grid.SetColumnSpan(previewViewer,stackProperties?1:2);
+                    Grid.SetRow(previewViewer,4); Grid.SetRowSpan(previewViewer,1);
+                    previewViewer.Height=380; previewViewer.Margin=new Thickness(0,12,0,0);
+                }
+                else
+                {
+                    Grid.SetColumn(previewViewer,2); Grid.SetColumnSpan(previewViewer,1);
+                    Grid.SetRow(previewViewer,0); Grid.SetRowSpan(previewViewer,2);
+                    previewViewer.Height=double.NaN; previewViewer.Margin=new Thickness(12,0,0,0);
+                }
             };
             panel.Children.Add(details);
             var summary = new DockPanel { Margin=new Thickness(0,0,0,8),LastChildFill=true };
             var selectionButtons=new StackPanel { Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right };
-            var selectAll=Button("Chọn tất cả",false);
-            var selectNone=Button("Bỏ chọn",false);
-            var filter=Button("Filter",false);
-            var sort=Button("Sort",false);
+            var selectAll=IconButton("Chọn tất cả",
+                "M3,3 L21,3 21,21 3,21 Z M7,12 L10,15 17,8");
+            var selectNone=IconButton("Bỏ chọn tất cả",
+                "M3,3 L21,3 21,21 3,21 Z M7,12 L17,12");
+            var filter=IconButton("Lọc phần tử",
+                "M3,4 L21,4 14,12 14,19 10,21 10,12 Z");
+            var sort=IconButton("Sắp xếp phần tử",
+                "M4,6 L14,6 M4,12 L11,12 M4,18 L8,18 M18,5 L18,19 M14,15 L18,19 22,15");
+            filter.Name="FilterSources"; sort.Name="SortSources";
             foreach(var button in new[] { filter,sort,selectAll,selectNone })
             {
-                button.Height=40; button.MinHeight=40;
-                button.Padding=new Thickness(14,0,14,0); button.FontSize=14;
                 button.HorizontalContentAlignment=HorizontalAlignment.Center;
                 button.VerticalContentAlignment=VerticalAlignment.Center;
                 selectionButtons.Children.Add(button);
@@ -502,7 +577,7 @@ namespace IFCInfo
                 Name="IfcElementSearch", Height=40, FontSize=14,
                 VerticalContentAlignment=VerticalAlignment.Center,
                 Padding=new Thickness(10,0,10,0), Margin=new Thickness(0,3,8,3),
-                ToolTip="Tìm theo tên, Element ID, IFC GUID hoặc hệ thống",
+                ToolTip="Tìm theo Element ID hoặc tên phần tử",
                 BorderBrush=Brush("#DCE4ED"), Background=Brush("#FFFFFF")
             };
             var searchLayout=new Grid();
@@ -513,7 +588,7 @@ namespace IFCInfo
             placeholder.IsHitTestVisible=false;
             searchLayout.Children.Add(placeholder);
             string filterMode="all";
-            string filterSystem=null;
+            string filterExistence=null;
             Action applyFilter=()=>
             {
                 string query=search.Text.Trim();
@@ -522,8 +597,8 @@ namespace IFCInfo
                 {
                     var row=(AirTerminalRow)item;
                     return (filterMode=="all" || (filterMode=="selected" ? row.IsSelected : !row.IsSelected))
-                        && (filterSystem==null || row.SystemType==filterSystem)
-                        && new[] { row.ElementId,row.Name,row.IfcGuid,row.SystemType,row.SystemName }
+                        && (filterExistence==null || row.DuctExistence==filterExistence)
+                        && new[] { row.ElementId,row.Name }
                         .Any(value=>(value??"").IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0);
                 };
                 queueProperties();
@@ -534,30 +609,39 @@ namespace IFCInfo
                 var menu=new ContextMenu();
                 foreach(var option in new[] { new { Label="Tất cả",Mode="all" },new { Label="Đang tích chọn",Mode="selected" },new { Label="Chưa tích chọn",Mode="unselected" } })
                 {
-                    var item=new MenuItem { Header=option.Label,IsCheckable=true,IsChecked=filterMode==option.Mode && filterSystem==null };
-                    item.Click+=(a,b)=> { filterMode=option.Mode;filterSystem=null;filter.Content=option.Mode=="all"?"Filter":"Filter •";applyFilter(); };
+                    var item=new MenuItem { Header=option.Label,IsCheckable=true,IsChecked=filterMode==option.Mode && filterExistence==null };
+                    item.Click+=(a,b)=> { filterMode=option.Mode;filterExistence=null;SetIconButtonActive(filter,option.Mode!="all");applyFilter(); };
                     menu.Items.Add(item);
                 }
-                var systems=new MenuItem { Header="System Type" };
-                foreach(string system in propertyRows.Select(r=>r.SystemType).Where(v=>!string.IsNullOrEmpty(v)).Distinct().OrderBy(v=>v))
+                if (CanCreateDucts)
                 {
-                    var item=new MenuItem { Header=system,IsCheckable=true,IsChecked=filterSystem==system };
-                    item.Click+=(a,b)=> {filterMode="all";filterSystem=system;filter.Content="Filter •";applyFilter();};
-                    systems.Items.Add(item);
+                    var existence=new MenuItem { Header="Đối chiếu Duct" };
+                    foreach(string value in propertyRows.Select(r=>r.DuctExistence).Where(v=>!string.IsNullOrEmpty(v)).Distinct().OrderBy(v=>v))
+                    {
+                        var item=new MenuItem { Header=value,IsCheckable=true,IsChecked=filterExistence==value };
+                        item.Click+=(a,b)=> {filterMode="all";filterExistence=value;SetIconButtonActive(filter,true);applyFilter();};
+                        existence.Items.Add(item);
+                    }
+                    menu.Items.Add(existence);
                 }
-                menu.Items.Add(systems);menu.PlacementTarget=filter;menu.IsOpen=true;
+                filter.ContextMenu=menu;menu.PlacementTarget=filter;menu.IsOpen=true;
             };
             sort.Click+=(s,e)=>
             {
                 var menu=new ContextMenu();
-                foreach(var field in new[] { new { Label="Element ID",Key="ElementId" },new { Label="Tên phần tử",Key="Name" },new { Label="System Type",Key="SystemType" },new { Label="System Name",Key="SystemName" } })
+                var fields=new List<KeyValuePair<string,string>> {
+                    new KeyValuePair<string,string>("Chọn","IsSelected"),
+                    new KeyValuePair<string,string>("Element ID","ElementId"),
+                    new KeyValuePair<string,string>("Phần tử","Name") };
+                if (CanCreateDucts) fields.Insert(1,new KeyValuePair<string,string>("Đối chiếu Duct","DuctExistence"));
+                foreach(var field in fields)
                 foreach(var direction in new[] { ListSortDirection.Ascending,ListSortDirection.Descending })
                 {
-                    var item=new MenuItem { Header=field.Label+(direction==ListSortDirection.Ascending?" ↑":" ↓") };
-                    item.Click+=(a,b)=> {sourceView.SortDescriptions.Clear();sourceView.SortDescriptions.Add(new SortDescription(field.Key,direction));};
+                    var item=new MenuItem { Header=field.Key+(direction==ListSortDirection.Ascending?" ↑":" ↓") };
+                    item.Click+=(a,b)=> {sourceView.SortDescriptions.Clear();sourceView.SortDescriptions.Add(new SortDescription(field.Value,direction));};
                     menu.Items.Add(item);
                 }
-                menu.PlacementTarget=sort;menu.IsOpen=true;
+                sort.ContextMenu=menu;menu.PlacementTarget=sort;menu.IsOpen=true;
             };
             summary.Children.Add(searchLayout);
             refreshProperties();
@@ -626,6 +710,102 @@ namespace IFCInfo
             template.Triggers.Add(disabled);
             button.Template = template;
             return button;
+        }
+
+        internal static Button IconButton(string tooltip, string geometry)
+        {
+            var icon = new System.Windows.Shapes.Path
+            {
+                Data = Geometry.Parse(geometry),
+                Stroke = Brush("#17335B"),
+                StrokeThickness = 1.8,
+                StrokeStartLineCap = PenLineCap.Round,
+                StrokeEndLineCap = PenLineCap.Round,
+                StrokeLineJoin = PenLineJoin.Round,
+                Fill = Brushes.Transparent,
+                Stretch = Stretch.Uniform,
+                Width = 20,
+                Height = 20,
+                IsHitTestVisible = false
+            };
+            var button = Button(string.Empty, false);
+            button.Content = icon;
+            button.ToolTip = tooltip;
+            button.Width = 44;
+            button.Height = 40;
+            button.MinHeight = 40;
+            button.Padding = new Thickness(11, 9, 11, 9);
+            button.Margin = new Thickness(6, 3, 0, 3);
+            return button;
+        }
+
+        private static void SetIconButtonActive(Button button, bool active)
+        {
+            button.Background = Brush(active ? "#E0EEFF" : "#F7FAFF");
+            button.BorderBrush = Brush(active ? "#147BFA" : "#DCE4ED");
+        }
+
+        private void ZoomToIfcSource(AirTerminalRow row)
+        {
+            if (row==null) return;
+            const string action="Zoom tới nguồn IFC";
+            if (NavigateSource!=null)
+            {
+                try
+                {
+                    NavigateSource(row,action);
+                    feedback.Text="Đã zoom tới nguồn IFC · tool vẫn đang mở.";
+                    feedback.Foreground=Brush("#16744B");
+                }
+                catch (Exception ex)
+                {
+                    feedback.Text="Không zoom được tới nguồn IFC: "+ex.Message;
+                    feedback.Foreground=Brush("#B54747");
+                }
+                return;
+            }
+            // Fallback cho host không cung cấp callback điều hướng.
+            NavigationRow=row; NavigationAction=action; Close();
+        }
+
+        private void OnSourceInitialized(object sender, EventArgs args)
+        {
+            var helper=new WindowInteropHelper(this);
+            nativeOwner=helper.Owner;
+            nativeSource=HwndSource.FromHwnd(helper.Handle);
+            nativeSource?.AddHook(WindowMessageHook);
+        }
+
+        private IntPtr WindowMessageHook(IntPtr window, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if(message==WmSysCommand && (wParam.ToInt64() & 0xFFF0L)==ScMinimize && nativeOwner!=IntPtr.Zero)
+            {
+                // An owned native window normally minimizes together with Revit.
+                // Detach and temporarily release ShowDialog's native owner lock so
+                // the user can inspect/orbit the zoomed element in Revit.
+                SetWindowLongPtr(window,GwlHwndParent,IntPtr.Zero);
+                EnableWindow(nativeOwner,true);
+                detachedForMinimize=true;
+                ShowWindow(window,SwMinimize);
+                handled=true;
+            }
+            return IntPtr.Zero;
+        }
+
+        private void OnWindowStateChanged(object sender, EventArgs args)
+        {
+            if(!detachedForMinimize || WindowState==WindowState.Minimized || nativeOwner==IntPtr.Zero) return;
+            var handle=new WindowInteropHelper(this).Handle;
+            // Restore modal behavior before showing the tool again.
+            EnableWindow(nativeOwner,false);
+            if(handle!=IntPtr.Zero) SetWindowLongPtr(handle,GwlHwndParent,nativeOwner);
+            detachedForMinimize=false;
+        }
+
+        private void OnWindowClosed(object sender, EventArgs args)
+        {
+            if(nativeSource!=null) nativeSource.RemoveHook(WindowMessageHook);
+            nativeSource=null;
         }
 
         private void Copy(string value)

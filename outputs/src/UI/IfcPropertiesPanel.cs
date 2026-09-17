@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -10,9 +11,10 @@ namespace IFCInfo
     {
         private readonly DataGrid properties;
         private readonly TextBlock selectionCount;
+        private List<KeyValuePair<string,string>> currentValues = new List<KeyValuePair<string,string>>();
         public TextBlock SelectionTotal => selectionCount;
         public string AllPropertyValues() => string.Join(System.Environment.NewLine,
-            properties.Items.Cast<KeyValuePair<string,string>>().Select(p=>p.Key+"\t"+p.Value));
+            currentValues.Select(p=>p.Key+"\t"+p.Value));
         public IfcPropertiesPanel()
         {
             Name = "IfcPropertiesPanel";
@@ -35,6 +37,26 @@ namespace IFCInfo
             style.Setters.Add(new Setter(TextBlock.MarginProperty, new Thickness(5)));
             properties.Columns.Add(new DataGridTextColumn { Header="Thuộc tính", Binding=new Binding("Key"), Width=new DataGridLength(1,DataGridLengthUnitType.Star), ElementStyle=style });
             properties.Columns.Add(new DataGridTextColumn { Header="Giá trị", Binding=new Binding("Value"), Width=new DataGridLength(1.2,DataGridLengthUnitType.Star), ElementStyle=style });
+            properties.GroupStyle.Add(new GroupStyle
+            {
+                ContainerStyle = (Style)System.Windows.Markup.XamlReader.Parse(@"
+<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='GroupItem'>
+ <Setter Property='Template'>
+  <Setter.Value>
+   <ControlTemplate TargetType='GroupItem'>
+    <Expander IsExpanded='True' Margin='0,2,0,0'>
+     <Expander.Header>
+      <Border Background='#E8E8E8' BorderBrush='#D1D1D1' BorderThickness='0,0,0,1' Padding='5,3'>
+       <TextBlock Text='{Binding Name}' FontWeight='SemiBold' Foreground='#303030'/>
+      </Border>
+     </Expander.Header>
+     <ItemsPresenter/>
+    </Expander>
+   </ControlTemplate>
+  </Setter.Value>
+ </Setter>
+</Style>")
+            });
             layout.Children.Add(properties);
         }
         public void SetSelectionCount(int selected, int total)
@@ -48,7 +70,9 @@ namespace IFCInfo
             var rows=selected.Where(r=>r!=null).Distinct().ToList();
             if (rows.Count==0)
             {
-                properties.ItemsSource=new List<KeyValuePair<string,string>>(); return;
+                currentValues=new List<KeyValuePair<string,string>>();
+                properties.ItemsSource=currentValues;
+                return;
             }
             var maps=rows.Select(r=>Values(r).GroupBy(p=>p.Key).ToDictionary(g=>g.Key,
                 g=>g.Select(p=>p.Value??"").Distinct().Count()==1 ? g.First().Value??"" : "<varies>")).ToList();
@@ -58,17 +82,16 @@ namespace IFCInfo
                 var entries=maps.Where(m=>m.ContainsKey(key)).Select(m=>m[key]).Distinct().ToList();
                 values.Add(new KeyValuePair<string,string>(key,entries.Count==1 && maps.All(m=>m.ContainsKey(key)) ? entries[0] : "<varies>"));
             }
-            properties.ItemsSource=values;
+            currentValues=values;
+            var view=new ListCollectionView(values);
+            view.GroupDescriptions.Add(new PropertyGroupDescription("Key",new PropertySectionConverter()));
+            properties.ItemsSource=view;
             if (values.Count>0) properties.ScrollIntoView(values[0]);
         }
 
         private static List<KeyValuePair<string,string>> Values(AirTerminalRow row)
         {
             var values = new List<KeyValuePair<string,string>>();
-            values.Add(new KeyValuePair<string,string>("Element ID trong link",row.ElementId));
-            values.Add(new KeyValuePair<string,string>("IFC GUID",row.IfcGuid));
-            values.Add(new KeyValuePair<string,string>("System Type",row.SystemType));
-            values.Add(new KeyValuePair<string,string>("System Name",row.SystemName));
             values.Add(new KeyValuePair<string,string>("Cao độ (mm)",row.Elevation));
             var duct=row.DuctSource;
             if (duct != null)
@@ -78,11 +101,31 @@ namespace IFCInfo
                     new KeyValuePair<string,double>("Đường kính (mm)",duct.DiameterMm) })
                     if (size.Value>0) values.Add(new KeyValuePair<string,string>(size.Key,size.Value.ToString("R",System.Globalization.CultureInfo.InvariantCulture)));
             }
+            values.Add(new KeyValuePair<string,string>("System Type",row.SystemType));
+            values.Add(new KeyValuePair<string,string>("System Name",row.SystemName));
+            values.Add(new KeyValuePair<string,string>("Element ID trong link",row.ElementId));
+            values.Add(new KeyValuePair<string,string>("IFC GUID",row.IfcGuid));
             foreach (var p in row.IfcProperties)
                 values.Add(new KeyValuePair<string,string>(p.Scope+" / "+p.SetName+" / "+p.Name,
                     p.Value+(string.IsNullOrEmpty(p.Unit)?"":" ["+p.Unit+"]")));
             if (row.IfcProperties.Count==0) values.Add(new KeyValuePair<string,string>("Pset / Qto","Không có dữ liệu thuộc tính IFC đã đọc."));
             return values;
+        }
+
+        private sealed class PropertySectionConverter : IValueConverter
+        {
+            public object Convert(object value,System.Type targetType,object parameter,CultureInfo culture)
+            {
+                string key=value as string ?? "";
+                if (key=="Cao độ (mm)") return "Constraints";
+                if (key=="Chiều dài (mm)" || key=="Rộng (mm)" || key=="Cao (mm)" || key=="Đường kính (mm)") return "Dimensions";
+                if (key=="System Type" || key=="System Name") return "Mechanical";
+                if (key=="Element ID trong link" || key=="IFC GUID") return "Identity Data";
+                var parts=key.Split(new[] { " / " },System.StringSplitOptions.None);
+                return parts.Length>=3 ? "IFC · "+parts[1] : "IFC Property Sets";
+            }
+            public object ConvertBack(object value,System.Type targetType,object parameter,CultureInfo culture)
+                => Binding.DoNothing;
         }
     }
 }
