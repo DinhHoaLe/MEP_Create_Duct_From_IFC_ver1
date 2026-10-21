@@ -1,6 +1,6 @@
-﻿namespace IFCInfo
+namespace IFCInfo
 {
-    /// <summary>Một Category có phần tử trong model link.</summary>
+    /// <summary>A category containing elements in the linked model.</summary>
     public sealed class CategoryOption
     {
         public long Id { get; set; }

@@ -1,6 +1,6 @@
-﻿namespace IFCInfo
+namespace IFCInfo
 {
-    /// <summary>Dữ liệu đọc từ IFC theo GUID: hệ thống, cao độ và kích thước nếu là Duct.</summary>
+    /// <summary>IFC data keyed by GUID: systems, elevation and duct dimensions.</summary>
     public sealed class IfcTerminalSource
     {
         public string Guid { get; set; }

@@ -1,0 +1,7 @@
+Revit 2023 build
+API file version: 23.0.11.19
+Target framework: net48
+Load IFCInfo_Revit2023.dll using a compatible Add-in Manager.
+Command: IFCInfo.IFCInfoCommand
+Build success does not certify live model transactions.
+Use this package only with a compatible Revit API/runtime; the 26.5 .NET 10 build is not for earlier .NET 8 Revit 2026 installations.

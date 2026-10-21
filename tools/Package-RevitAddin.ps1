@@ -12,7 +12,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Revit 2024 build failed.' }
 
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 Copy-Item -LiteralPath $builtDll -Destination (Join-Path $packageRoot 'IFCInfo.dll') -Force
-foreach ($name in @('Install.cmd', 'Install.ps1', 'HUONG_DAN.txt')) {
+foreach ($name in @('Install.cmd', 'Install.ps1', 'README.txt')) {
     Copy-Item -LiteralPath (Join-Path $installerRoot $name) -Destination (Join-Path $packageRoot $name) -Force
 }
 Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath $zipPath -Force

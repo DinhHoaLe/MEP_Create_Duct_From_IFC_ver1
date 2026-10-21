@@ -10,9 +10,9 @@ namespace IFCInfo
         internal static long Number(this ElementId id)
         {
             if (id == null) throw new ArgumentNullException(nameof(id));
-            return LongValue != null ? (long)LongValue.GetValue(id) : id.IntegerValue;
+            return LongValue != null ? (long)LongValue.GetValue(id) : (int)typeof(ElementId).GetProperty("IntegerValue").GetValue(id);
         }
         internal static ElementId Create(long value) => LongConstructor != null
-            ? (ElementId)LongConstructor.Invoke(new object[] { value }) : new ElementId(checked((int)value));
+            ? (ElementId)LongConstructor.Invoke(new object[] { value }) : (ElementId)Activator.CreateInstance(typeof(ElementId), checked((int)value));
     }
 }

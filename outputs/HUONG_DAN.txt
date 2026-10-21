@@ -1,5 +1,0 @@
-HƯỚNG DẪN DỰ ÁN IFC INFO
-
-Bản hiện tại là add-in C# cho Revit 2024, không phải extension pyRevit.
-Xem HUONG_DAN_CSHARP.txt trong cùng thư mục để cài đặt và sử dụng.
-Tool có tạo/cập nhật phần tử và thay đổi model; không phải công cụ chỉ đọc.

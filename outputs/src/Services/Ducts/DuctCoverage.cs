@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -34,11 +34,11 @@ namespace IFCInfo
             bool wrongSystem = expectedSystemTypeId.HasValue && overlapping.Any(d => d.SystemTypeId != expectedSystemTypeId.Value);
             bool wrongRotation = diameter <= 0 && widthAxis != null && overlapping.Any(d => d.WidthAxis != null &&
                 Math.Abs(Dot(widthAxis,d.WidthAxis)) < 1-1e-6);
-            result.Status = wrongSize && wrongSystem ? "Sai kích thước và hệ thống"
-                : wrongSize ? "Sai kích thước"
-                : wrongSystem ? "Sai hệ thống"
-                : wrongRotation ? "Sai góc tiết diện"
-                : !expectedSystemTypeId.HasValue ? "Chưa xác định hệ thống" : "Khớp hoàn toàn";
+            result.Status = wrongSize && wrongSystem ? "Size and system mismatch"
+                : wrongSize ? "Size mismatch"
+                : wrongSystem ? "System mismatch"
+                : wrongRotation ? "Profile rotation mismatch"
+                : !expectedSystemTypeId.HasValue ? "System unknown" : "Exact match";
             return result;
         }
         public static Result Check(double[] start, double[] end, IEnumerable<Segment> ducts, double tolerance)
@@ -46,7 +46,7 @@ namespace IFCInfo
             var vector = Sub(end, start);
             double length = Norm(vector);
             if (length <= tolerance)
-                return new Result { Status = "Chưa xác định" };
+                return new Result { Status = "Unknown" };
             var axis = vector.Select(v => v / length).ToArray();
             var intervals = new List<double[]>();
             var result = new Result();
@@ -65,7 +65,7 @@ namespace IFCInfo
             }
             if (intervals.Count == 0)
             {
-                result.Status = "Chưa tồn tại";
+                result.Status = "Not created";
                 return result;
             }
             double covered = 0;
@@ -73,12 +73,12 @@ namespace IFCInfo
             {
                 if (span[0] > covered + tolerance)
                 {
-                    result.Status = "Trùng một phần";
+                    result.Status = "Partial overlap";
                     return result;
                 }
                 covered = Math.Max(covered, span[1]);
             }
-            result.Status = covered >= length - tolerance ? "Đã tồn tại" : "Trùng một phần";
+            result.Status = covered >= length - tolerance ? "Already exists" : "Partial overlap";
             result.FullyCovered = covered >= length - tolerance;
             return result;
         }

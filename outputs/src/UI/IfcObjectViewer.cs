@@ -18,7 +18,7 @@ namespace IFCInfo
         public List<int> Indices = new List<int>();
     }
 
-    /// <summary>Viewer 3D nhẹ để review mesh đã trích từ phần tử trong IFC link.</summary>
+    /// <summary>Lightweight 3D viewer for meshes extracted from linked IFC elements.</summary>
     public sealed class IfcObjectViewer : Border
     {
         private readonly Viewport3D viewport;
@@ -48,11 +48,11 @@ namespace IFCInfo
             DockPanel.SetDock(header,Dock.Top); layout.Children.Add(header);
             headerActions=new StackPanel { Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right };
             DockPanel.SetDock(headerActions,Dock.Right); header.Children.Add(headerActions);
-            var reset = IFCInfoWindow.IconButton("Đặt lại góc nhìn",
+            var reset = IFCInfoWindow.IconButton("Reset view",
                 "M19,7 L19,3 15,3 M19,3 L15,7 M19,3 C15,-1 7,0 4,6 C1,12 5,20 12,20 C16,20 19,18 21,15");
             reset.Width=36; reset.Height=34; reset.MinHeight=34; reset.Margin=new Thickness(6,0,0,0);
             reset.Click+=(s,e)=>ResetView(); headerActions.Children.Add(reset);
-            var title=IFCInfoWindow.Text("Viewer · Nguồn IFC",18,"#37322B");
+            var title=IFCInfoWindow.Text("Viewer · IFC source",18,"#37322B");
             title.VerticalAlignment=VerticalAlignment.Center; header.Children.Add(title);
             var host = new Grid { Background = IFCInfoWindow.Brush("#F5F2EE"), ClipToBounds=true };
             layout.Children.Add(host);
@@ -61,7 +61,7 @@ namespace IFCInfo
             viewport.Camera=camera;
             scene=new Model3DGroup();
             viewport.Children.Add(new ModelVisual3D { Content=scene });
-            status=IFCInfoWindow.Text("Chọn một dòng để xem trước đối tượng.",13,"#716B63");
+            status=IFCInfoWindow.Text("Select one row to preview its geometry.",13,"#716B63");
             status.HorizontalAlignment=HorizontalAlignment.Center; status.VerticalAlignment=VerticalAlignment.Bottom;
             status.TextAlignment=TextAlignment.Center; status.Margin=new Thickness(12);
             status.Background=new SolidColorBrush(Color.FromArgb(225,255,255,255)); host.Children.Add(status);
@@ -105,7 +105,7 @@ namespace IFCInfo
             headerActions.Children.Insert(0,button);
         }
 
-        public void Clear(string message="Chọn một dòng để xem trước đối tượng.")
+        public void Clear(string message="Select one row to preview its geometry.")
         {
             lastElementId=0; scene.Children.Clear(); AddLights();
             emptyIcon.Data=Geometry.Parse("M4,8 L12,4 20,8 12,12 Z M4,8 L4,17 12,21 12,12 M20,8 L20,17 12,21");
@@ -117,7 +117,7 @@ namespace IFCInfo
         {
             lastElementId=0; scene.Children.Clear(); AddLights();
             emptyIcon.Data=Geometry.Parse("M3,7 L13,7 13,17 3,17 Z M7,3 L17,3 17,13 M11,7 L21,7 21,17 13,17");
-            emptyMessage.Text="Đang chọn nhiều đối tượng ("+count+")\nChọn đúng một đối tượng để xem trước.";
+            emptyMessage.Text="Multiple objects selected ("+count+")\nSelect exactly one object to preview.";
             emptyState.Visibility=Visibility.Visible;
             status.Visibility=Visibility.Collapsed;
         }
@@ -131,7 +131,7 @@ namespace IFCInfo
             try
             {
                 if (model.Indices.Count==0 || model.Points.Count==0)
-                    throw new InvalidOperationException("Phần tử không có hình học 3D có thể hiển thị.");
+                    throw new InvalidOperationException("The element has no displayable 3D geometry.");
                 double minX=model.Points.Min(p=>p.X),maxX=model.Points.Max(p=>p.X);
                 double minY=model.Points.Min(p=>p.Y),maxY=model.Points.Max(p=>p.Y);
                 double minZ=model.Points.Min(p=>p.Z),maxZ=model.Points.Max(p=>p.Z);
@@ -145,10 +145,10 @@ namespace IFCInfo
                 scene.Children.Add(new GeometryModel3D(mesh,material) { BackMaterial=material });
                 double extent=Math.Max(maxX-minX,Math.Max(maxY-minY,maxZ-minZ));
                 distance=Math.Max(0.2,extent*2.4); yaw=-0.75; pitch=0.45; UpdateCamera();
-                status.Text=(model.Name??"Đối tượng IFC")+" · kéo chuột để xoay · lăn để zoom";
+                status.Text=(model.Name??"IFC object")+" · drag to rotate · scroll to zoom";
                 status.Visibility=Visibility.Visible;
             }
-            catch (Exception ex) { Clear("Không xem trước được: "+ex.Message); }
+            catch (Exception ex) { Clear("Could not preview: "+ex.Message); }
         }
 
         private void ResetView() { yaw=-0.75; pitch=0.45; UpdateCamera(); }

@@ -1,6 +1,0 @@
-TẠO / CẬP NHẬT DUCT TỪ IFC — REVIT 2024
-
-Hướng dẫn chính được duy trì trong HUONG_DAN_CSHARP.txt, mục 2–5.
-Xem IFC_COMPATIBILITY.md về IFC2X3/IFC4 và DUCT_COMPARISON.md về trạng thái đối chiếu.
-Tool hỗ trợ tùy chọn nối fitting/connector; mặc định tắt. Thao tác tạo/cập nhật có sửa model và có chính sách hoàn tác.
-Xem CHANGELOG.md về bản sửa hiện tại; xem TIEN_DO_7_BUOC.md về checklist nghiệm thu trong Revit.

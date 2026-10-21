@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -44,7 +44,7 @@ namespace IFCInfo
             var reader = new IfcSourceReader();
             string text = File.ReadAllText(path);
             if (!Regex.IsMatch(text, @"FILE_SCHEMA\s*\(\s*\(\s*'(IFC2X3|IFC4)'\s*\)\s*\)", RegexOptions.IgnoreCase))
-                throw new NotSupportedException("Hỗ trợ IFC2X3 và IFC4 dạng STEP (.ifc). Schema khác chưa được hỗ trợ.");
+                throw new NotSupportedException("IFC2X3 and IFC4 STEP (.ifc) files are supported. Other schemas are not supported.");
             var pattern = new Regex(@"^\s*#(\d+)\s*=\s*(\w+)\s*\((.*)\)\s*$", RegexOptions.Singleline);
             foreach (string statement in Split(text, ';'))
             {
@@ -75,7 +75,7 @@ namespace IFCInfo
                 {
                     int end = text.IndexOf("*/", i + 2, StringComparison.Ordinal);
                     if (end < 0)
-                        throw new FormatException("IFC comment không hợp lệ.");
+                        throw new FormatException("Invalid IFC comment.");
                     i = end + 1;
                     continue;
                 }
@@ -106,7 +106,7 @@ namespace IFCInfo
                 part.Append(ch);
             }
             if (quoted || depth != 0)
-                throw new FormatException("Cấu trúc STEP chưa hoàn chỉnh.");
+                throw new FormatException("The STEP structure is incomplete.");
             if (part.Length > 0)
                 yield return part.ToString().Trim();
         }
@@ -141,7 +141,7 @@ namespace IFCInfo
         {
             Entity result;
             if (!entities.TryGetValue(id, out result))
-                throw new FormatException("Không tìm thấy IFC entity #" + id);
+                throw new FormatException("IFC entity not found: #" + id);
             return result;
         }
 
@@ -219,6 +219,9 @@ namespace IFCInfo
                 {
                     // Same ordering in both columns preserves system/type pairing.
                     var ordered = groups.OrderBy(g => Label(systems[g].At(2)), StringComparer.Ordinal).ToArray();
+                    foreach(int systemId in ordered)
+                        if(propertySets.TryGetValue(systemId,out var systemSets))
+                            foreach(var set in systemSets.Distinct()) ReadPropertySet(set.Item1,"System",result.Properties);
                     result.SystemName = string.Join("; ", ordered.Select(g => EmptyLabel(Label(systems[g].At(2)))));
                     result.SystemType = string.Join("; ", ordered.Select(g => EmptyLabel(SystemTypeLabel(systems[g]))));
                 }
@@ -292,7 +295,7 @@ namespace IFCInfo
         }
         private static string EmptyLabel(string value)
         {
-            return string.IsNullOrWhiteSpace(value) ? "Không có thông tin" : value;
+            return string.IsNullOrWhiteSpace(value) ? "No information" : value;
         }
         private static string SystemTypeLabel(Entity system)
         {
@@ -303,25 +306,25 @@ namespace IFCInfo
         private void ReadDuctSize(Entity product, IfcTerminalSource result, double? mm)
         {
             if (!mm.HasValue)
-                throw new NotSupportedException("Không xác định được đơn vị IFC.");
+                throw new NotSupportedException("Could not determine IFC units.");
             var body = Refs(Get(Ref(product.At(6))).At(2)).Select(Get)
                 .Where(e => Label(e.At(1)).Equals("Body", StringComparison.OrdinalIgnoreCase)).ToArray();
             var items = body.SelectMany(e => Refs(e.At(3))).ToArray();
             if (items.Length != 1)
-                throw new NotSupportedException("Body phải chứa đúng một khối ống; tìm thấy " + items.Length + " mục hình học.");
+                throw new NotSupportedException("Body must contain exactly one duct solid; found " + items.Length + " geometry items.");
             double[] transform = Identity();
             Entity solid = ResolveDuctSolid(items[0], ref transform, new HashSet<int>());
             double[] direction = Normalize(Vector(Ref(solid.At(2))));
             if (Math.Abs(direction[2]) < 1 - 1e-8)
-                throw new NotSupportedException("Chưa hỗ trợ tiết diện đùn xiên.");
+                throw new NotSupportedException("Oblique profile extrusions are not supported.");
             Entity profile = Get(Ref(solid.At(0)));
             if (profile.Kind == "IFCELLIPSEPROFILEDEF")
             {
                 result.ProfileShape = "Oval";
-                throw new NotSupportedException("Tiết diện ellipse IFC không tương đương oval phẳng của Revit; cần chuyển đổi tiết diện nguồn trước khi tạo.");
+                throw new NotSupportedException("An IFC ellipse is not equivalent to a Revit flat oval; convert the source profile before creation.");
             }
             if (profile.Kind != "IFCCIRCLEPROFILEDEF" && profile.Kind != "IFCRECTANGLEPROFILEDEF" && profile.Kind != "IFCROUNDEDRECTANGLEPROFILEDEF")
-                throw new NotSupportedException("Chưa hỗ trợ tiết diện " + profile.Kind);
+                throw new NotSupportedException("Unsupported profile: " + profile.Kind);
             // Include solid and profile rotations before measuring nonuniform scaling.
             double[] solidAxes = AxisRotation(Ref(solid.At(1)));
             double[] profileAxes = AxisRotation(Ref(profile.At(2)));
@@ -330,12 +333,12 @@ namespace IFCInfo
             double[] y = TransformDirection(section, new double[] { 0, 1, 0 });
             double[] z = TransformDirection(Multiply(transform, solidAxes), direction);
             if (!Orthogonal(x, y) || !Orthogonal(x, z) || !Orthogonal(y, z))
-                throw new NotSupportedException("Phép biến đổi làm xiên tiết diện hoặc trục ống; chưa hỗ trợ.");
+                throw new NotSupportedException("Transformations that skew the profile or duct axis are not supported.");
             double sx = Magnitude(x), sy = Magnitude(y), sz = Magnitude(z);
             if (profile.Kind == "IFCCIRCLEPROFILEDEF")
             {
                 if (Math.Abs(sx - sy) > Math.Max(sx, sy) * 1e-8)
-                    throw new NotSupportedException("Phép co giãn biến tiết diện tròn thành oval; chưa hỗ trợ.");
+                    throw new NotSupportedException("Scaling a circular profile into an ellipse is not supported.");
                 result.DiameterMm = 2 * Number(profile.At(3)) * sx * mm.Value;
                 result.ProfileShape = "Round";
             }
@@ -348,31 +351,31 @@ namespace IFCInfo
                 {
                     if (Math.Abs(sx-sy)>Math.Max(sx,sy)*1e-8 ||
                         Math.Abs(Number(profile.At(5))*2-Math.Min(Number(profile.At(3)),Number(profile.At(4))))>1e-7)
-                        throw new NotSupportedException("Chỉ hỗ trợ oval phẳng với bán kính bo bằng nửa cạnh nhỏ.");
+                        throw new NotSupportedException("Only flat oval profiles with a corner radius equal to half the smaller dimension are supported.");
                     result.ProfileShape = "Oval";
                 }
             }
             else
-                throw new NotSupportedException("Chưa hỗ trợ tiết diện " + profile.Kind);
+                throw new NotSupportedException("Unsupported profile: " + profile.Kind);
             result.LengthMm = Number(solid.At(3)) * sz * mm.Value;
             if (result.LengthMm <= 0 || (result.DiameterMm <= 0 && (result.WidthMm <= 0 || result.HeightMm <= 0)))
-                throw new FormatException("Kích thước IFC không hợp lệ.");
+                throw new FormatException("Invalid IFC dimensions.");
         }
         private Entity ResolveDuctSolid(int id, ref double[] transform, HashSet<int> visiting)
         {
             if (visiting.Count >= 64 || !visiting.Add(id))
-                throw new FormatException("Tham chiếu hình học IFC có vòng lặp hoặc quá sâu.");
+                throw new FormatException("The IFC geometry reference contains a cycle or exceeds the depth limit.");
             Entity item = Get(id);
             if (item.Kind == "IFCEXTRUDEDAREASOLID")
                 return item;
             if (item.Kind != "IFCMAPPEDITEM")
-                throw new NotSupportedException("Chưa hỗ trợ hình học " + item.Kind + "; cần khối đùn thẳng (trực tiếp hoặc qua IfcMappedItem).");
+                throw new NotSupportedException("Unsupported geometry: " + item.Kind + "; a straight extrusion is required (direct or through IfcMappedItem).");
             Entity map = Get(Ref(item.At(0)));
             if (map.Kind != "IFCREPRESENTATIONMAP")
-                throw new FormatException("MappingSource không phải IfcRepresentationMap.");
+                throw new FormatException("MappingSource is not an IfcRepresentationMap.");
             var children = Refs(Get(Ref(map.At(1))).At(3)).ToArray();
             if (children.Length != 1)
-                throw new NotSupportedException("Hình học tham chiếu phải chứa đúng một khối ống.");
+                throw new NotSupportedException("Referenced geometry must contain exactly one duct solid.");
             double[] origin = AxisRotation(Ref(map.At(0)));
             double[] inverse = Identity();
             for (int r = 0; r < 3; r++)
@@ -386,7 +389,7 @@ namespace IFCInfo
             if (id == 0) return Identity();
             Entity axis = Get(id);
             if (axis.Kind != "IFCAXIS2PLACEMENT3D" && axis.Kind != "IFCAXIS2PLACEMENT2D")
-                throw new NotSupportedException("Kiểu trục hình học chưa hỗ trợ: " + axis.Kind);
+                throw new NotSupportedException("Unsupported geometry axis type: " + axis.Kind);
             bool is3D = axis.Kind == "IFCAXIS2PLACEMENT3D";
             double[] z = is3D && Ref(axis.At(1)) != 0 ? Normalize(Vector(Ref(axis.At(1)))) : new double[] { 0, 0, 1 };
             int xr = Ref(axis.At(is3D ? 2 : 1));
@@ -399,17 +402,17 @@ namespace IFCInfo
             Entity op = Get(id);
             if (op.Kind != "IFCCARTESIANTRANSFORMATIONOPERATOR3D" &&
                 op.Kind != "IFCCARTESIANTRANSFORMATIONOPERATOR3DNONUNIFORM")
-                throw new NotSupportedException("Phép biến đổi IFC chưa hỗ trợ: " + op.Kind);
+                throw new NotSupportedException("Unsupported IFC transformation: " + op.Kind);
             double[] x = Ref(op.At(0)) == 0 ? new double[] { 1, 0, 0 } : Normalize(Vector(Ref(op.At(0))));
             double[] y = Ref(op.At(1)) == 0 ? new double[] { 0, 1, 0 } : Normalize(Vector(Ref(op.At(1))));
             double[] z = Ref(op.At(4)) == 0 ? new double[] { 0, 0, 1 } : Normalize(Vector(Ref(op.At(4))));
             if (!Orthogonal(x, y) || !Orthogonal(x, z) || !Orthogonal(y, z))
-                throw new NotSupportedException("Các trục MappingTarget không trực giao; chưa hỗ trợ.");
+                throw new NotSupportedException("Nonorthogonal MappingTarget axes are not supported.");
             double sx = op.At(3) == "$" ? 1 : Number(op.At(3));
             double sy = op.At(5) == "$" ? sx : Number(op.At(5));
             double sz = op.At(6) == "$" ? sx : Number(op.At(6));
             if (sx <= 0 || sy <= 0 || sz <= 0)
-                throw new FormatException("Hệ số co giãn IFC phải lớn hơn 0.");
+                throw new FormatException("IFC scale factors must be greater than zero.");
             return Axes(x.Select(v => v * sx).ToArray(), y.Select(v => v * sy).ToArray(), z.Select(v => v * sz).ToArray());
         }
         private static double[] Axes(double[] x, double[] y, double[] z) => new double[] {
@@ -422,7 +425,7 @@ namespace IFCInfo
         private double UnitMetres(int id, int depth)
         {
             if (depth > 10)
-                throw new FormatException("Chuỗi đơn vị IFC không hợp lệ.");
+                throw new FormatException("Invalid IFC unit chain.");
             Entity unit = Get(id);
             if (unit.Kind == "IFCSIUNIT" && unit.At(3) == ".METRE.")
             {
@@ -440,14 +443,14 @@ namespace IFCInfo
                 double factor = Number(value.Substring(opening + 1, value.Length - opening - 2));
                 return factor * UnitMetres(Ref(measure.At(1)), depth + 1);
             }
-            throw new NotSupportedException("Đơn vị IFC chưa hỗ trợ.");
+            throw new NotSupportedException("Unsupported IFC units.");
         }
         private static double Number(string value)
         {
             double number;
             if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out number) ||
                 double.IsNaN(number) || double.IsInfinity(number))
-                throw new FormatException("Giá trị số IFC không hợp lệ.");
+                throw new FormatException("Invalid IFC numeric value.");
             return number;
         }
         private static double[] Identity()
@@ -468,14 +471,14 @@ namespace IFCInfo
             string token = Get(id).At(0);
             var values = Split(token.Substring(1, token.Length - 2), ',').Select(Number).ToArray();
             if (values.Length != 2 && values.Length != 3)
-                throw new FormatException("Vector IFC không hợp lệ.");
+                throw new FormatException("Invalid IFC vector.");
             return new[] { values[0], values[1], values.Length == 3 ? values[2] : 0 };
         }
         private static double[] Normalize(double[] v)
         {
             double length = Math.Sqrt(v.Sum(x => x * x));
             if (length < 1e-12)
-                throw new FormatException("Trục IFC không hợp lệ.");
+                throw new FormatException("Invalid IFC axis.");
             return v.Select(x => x / length).ToArray();
         }
         private static double[] Cross(double[] a, double[] b)
@@ -485,18 +488,18 @@ namespace IFCInfo
         private double[] Placement(int id, HashSet<int> visiting)
         {
             if (id == 0)
-                throw new NotSupportedException("IFC thiếu ObjectPlacement.");
+                throw new NotSupportedException("IFC ObjectPlacement is missing.");
             double[] cached;
             if (placements.TryGetValue(id, out cached))
                 return cached;
             if (visiting.Count > 100 || !visiting.Add(id))
-                throw new FormatException("Chuỗi placement IFC có vòng lặp.");
+                throw new FormatException("The IFC placement chain contains a cycle.");
             Entity placement = Get(id);
             if (placement.Kind != "IFCLOCALPLACEMENT")
-                throw new NotSupportedException("Chỉ hỗ trợ IfcLocalPlacement.");
+                throw new NotSupportedException("Only IfcLocalPlacement is supported.");
             Entity axis = Get(Ref(placement.At(1)));
             if (axis.Kind != "IFCAXIS2PLACEMENT3D" && axis.Kind != "IFCAXIS2PLACEMENT2D")
-                throw new NotSupportedException("Kiểu trục IFC chưa hỗ trợ.");
+                throw new NotSupportedException("Unsupported IFC axis type.");
             double[] origin = Vector(Ref(axis.At(0)));
             bool is3D = axis.Kind == "IFCAXIS2PLACEMENT3D";
             double[] z = is3D && Ref(axis.At(1)) != 0 ? Normalize(Vector(Ref(axis.At(1)))) : new double[] { 0, 0, 1 };

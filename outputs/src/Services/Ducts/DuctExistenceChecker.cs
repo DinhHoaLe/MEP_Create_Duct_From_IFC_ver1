@@ -9,7 +9,7 @@ using Autodesk.Revit.UI;
 
 namespace IFCInfo
 {
-    /// <summary>Đối chiếu ống nguồn với Duct trong model chính và cập nhật trạng thái từng dòng.</summary>
+    /// <summary>Compare source ducts with host-model ducts and update each row status.</summary>
     internal static class DuctExistenceChecker
     {
         private static double[] Coordinates(XYZ p) => new[] { p.X, p.Y, p.Z };
@@ -81,7 +81,7 @@ namespace IFCInfo
                 {
                     Element source = link.GetLinkDocument()?.GetElement(ElementIds.Create(long.Parse(row.ElementId)));
                     if (source == null)
-                        throw new InvalidOperationException("Không tìm thấy ống nguồn.");
+                        throw new InvalidOperationException("Source duct not found.");
                     var geometry = DuctGeometryReader.Read(source, row.DuctSource);
                     string key = link.UniqueId + "|" + (string.IsNullOrWhiteSpace(row.IfcGuid) ? source.UniqueId : row.IfcGuid) + "|" + (row.SystemType ?? "");
                     long? expectedSystem = null;
@@ -102,23 +102,23 @@ namespace IFCInfo
                         Coordinates(transform.OfPoint(geometry.End)), ducts, 1.0 / 304.8,
                         geometry.Width, geometry.Height, geometry.Diameter, expectedSystem,Coordinates(transform.OfVector(geometry.WidthAxis).Normalize()),geometry.Oval);
                     row.CorrespondingDuctIds = result.Ids;
-                    row.DuctExistence = incomplete && !result.FullyCovered ? "Chưa xác định" : result.Status;
-                    row.DuctExistenceDetail = "Đối chiếu đường tim, kích thước (sai số 1 mm) và hướng tiết diện. Hệ thống so theo System Type đích; System Name IFC lưu riêng, không dùng tên hệ thống tự sinh của Revit." +
-                        (expectedSystem.HasValue ? " System Type đích ID: " + expectedSystem.Value + "." : " Chưa xác định System Type đích: thiếu ánh xạ đã lưu hoặc tên IFC không khớp duy nhất tên type trong Revit.") +
-                        (result.FullyCovered ? " Đường tim đã được phủ đủ; không chọn tạo thêm để tránh chồng ống." : "") +
+                    row.DuctExistence = incomplete && !result.FullyCovered ? "Unknown" : result.Status;
+                    row.DuctExistenceDetail = "Comparing centerlines, dimensions (1 mm tolerance) and profile orientation. Systems are compared by target system type. IFC System Name is stored separately from Revit-generated system names." +
+                        (expectedSystem.HasValue ? " Target system type ID: " + expectedSystem.Value + "." : " Target system type is unknown: saved mapping is missing or the IFC name does not uniquely match a Revit type.") +
+                        (result.FullyCovered ? " The centerline is fully covered; creation is disabled to avoid duplicate ducts." : "") +
                         (result.Ids.Count == 0 ? "" : " Duct ID: " + string.Join(", ", result.Ids)) +
-                        (result.Ids.Count == 0 ? "" : " | Nguồn (mm): " + (geometry.Round
+                        (result.Ids.Count == 0 ? "" : " | Source (mm): " + (geometry.Round
                             ? "D=" + (geometry.Diameter * 304.8).ToString("0.##")
                             : (geometry.Width * 304.8).ToString("0.##") + " x " + (geometry.Height * 304.8).ToString("0.##"))) +
                         string.Join("", ducts.Where(d => result.Ids.Contains(d.Id)).Select(d => " | ID " + d.Id + ": " +
-                            (d.UnsupportedShape ? "Tiết diện khác" : d.Diameter > 0 ? "D=" + (d.Diameter * 304.8).ToString("0.##") :
+                            (d.UnsupportedShape ? "Other profile" : d.Diameter > 0 ? "D=" + (d.Diameter * 304.8).ToString("0.##") :
                                 (d.Width * 304.8).ToString("0.##") + " x " + (d.Height * 304.8).ToString("0.##")) + " mm, System Type ID=" + d.SystemTypeId)) +
-                        (incomplete ? " Có ống trong model chính chưa đọc được đường tim." : "");
+                        (incomplete ? " Some host-model ducts have unreadable centerlines." : "");
                 }
                 catch (Exception ex)
                 {
                     row.CorrespondingDuctIds.Clear();
-                    row.DuctExistence = "Chưa xác định";
+                    row.DuctExistence = "Unknown";
                     row.DuctExistenceDetail = ex.Message;
                 }
             }

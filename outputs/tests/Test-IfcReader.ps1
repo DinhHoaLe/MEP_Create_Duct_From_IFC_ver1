@@ -62,7 +62,7 @@ $nested = $mapped.Replace('#31=IFCREPRESENTATIONMAP(#6,#33);', '#31=IFCREPRESENT
 $d = (Read-Sample $nested).Ducts['duct']
 Assert (!$d.GeometryError -and $d.WidthMm -eq 800 -and $d.HeightMm -eq 900 -and $d.LengthMm -eq 16000) 'Nested mappings'
 $round = $mapped.Replace('IFCRECTANGLEPROFILEDEF(.AREA.,$,$,200.,100.)', 'IFCCIRCLEPROFILEDEF(.AREA.,$,$,50.)')
-Assert ((Read-Sample $round).Ducts['duct'].GeometryError -like '*oval*') 'Reject elliptical scaling'
+Assert ((Read-Sample $round).Ducts['duct'].GeometryError -like '*ellipse*') 'Reject elliptical scaling'
 $round = $round.Replace('#7,2.,$,3.,4.', '#7,2.,$,2.,4.')
 $d = (Read-Sample $round).Ducts['duct']
 Assert (!$d.GeometryError -and $d.DiameterMm -eq 200 -and $d.LengthMm -eq 4000) 'Round mapping'

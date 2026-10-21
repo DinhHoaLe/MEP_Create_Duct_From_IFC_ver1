@@ -14,13 +14,13 @@ namespace IFCInfo
             window.LoadPlacementFamily = (path, sourceCategoryId) =>
             {
                 if (!SupportedCategories.Contains(sourceCategoryId))
-                    throw new InvalidOperationException("Category này chưa được hỗ trợ.");
+                    throw new InvalidOperationException("This category is not supported.");
                 DuctCreation.RunTransaction(doc, "IFC - Load placement family", () =>
                 {
                     if (!doc.LoadFamily(path, out Family loaded))
-                        throw new InvalidOperationException("Không nạp được family. Family có thể đã tồn tại; hãy chọn type đã có hoặc chọn tệp .rfa khác.");
+                        throw new InvalidOperationException("Could not load the family. It may already exist; choose an existing type or another .rfa file.");
                     if (sourceCategoryId == 0 || loaded.FamilyCategory?.Id.Number() != sourceCategoryId)
-                        throw new InvalidOperationException("Family đã chọn không cùng Category nguồn IFC. Đã hủy nạp family; hãy chọn family đúng Category.");
+                        throw new InvalidOperationException("The selected family does not match the IFC source category. Loading was rolled back; select a family in the correct category.");
                 });
                 Configure(window, doc);
                 return window.ReplacementTypes;
@@ -30,7 +30,7 @@ namespace IFCInfo
             {
                 if (type.Category==null || !SupportedCategories.Contains(type.Category.Id.Number())) continue;
                 var option=new ReplacementTypeOption { Id=type.Id.Number(),CategoryId=type.Category.Id.Number(),CategoryName=type.Category.Name,
-                    Label=type.FamilyName+" : "+type.Name,Kind="Unsupported",Placement="Category này cần cách dựng chuyên biệt chưa có trong bản này." };
+                    Label=type.FamilyName+" : "+type.Name,Kind="Unsupported",Placement="This category requires a specialized builder that is not available in this version." };
                 if (type is FamilySymbol symbol)
                 {
                     var placement=symbol.Family.FamilyPlacementType;
@@ -40,11 +40,11 @@ namespace IFCInfo
                         placement==FamilyPlacementType.WorkPlaneBased || placement==FamilyPlacementType.TwoLevelsBased ||
                         placement==FamilyPlacementType.CurveBased || placement==FamilyPlacementType.CurveDrivenStructural || placement==FamilyPlacementType.Adaptive;
                     option.NeedsHost=placement==FamilyPlacementType.OneLevelBasedHosted || placement==FamilyPlacementType.WorkPlaneBased;
-                    option.Placement=placement==FamilyPlacementType.Adaptive ? "Adaptive: chọn điểm điều khiển trong model cho từng nguồn." :
-                        option.NeedsHost ? "Chọn một mặt host phẳng trong model chính sau khi xác nhận." :
-                        placement==FamilyPlacementType.TwoLevelsBased ? "Family hai Level: chọn Level dưới và Level trên." :
-                        placement==FamilyPlacementType.CurveBased || placement==FamilyPlacementType.CurveDrivenStructural ? "Family theo đường: dùng đường nguồn; nếu không đọc được sẽ yêu cầu chọn 2 điểm." :
-                        option.Supported ? "Đặt theo điểm nguồn; dùng tâm hình học nếu nguồn không có điểm đặt." : "Chưa hỗ trợ kiểu đặt: "+placement;
+                    option.Placement=placement==FamilyPlacementType.Adaptive ? "Adaptive: pick control points in the model for each source." :
+                        option.NeedsHost ? "Select a planar host face in the host model after confirming." :
+                        placement==FamilyPlacementType.TwoLevelsBased ? "Two-level family: select the base and top levels." :
+                        placement==FamilyPlacementType.CurveBased || placement==FamilyPlacementType.CurveDrivenStructural ? "Line-based family: use the source path, or pick two points if it cannot be read." :
+                        option.Supported ? "Place at the source point; use the geometry center if no insertion point exists." : "Unsupported placement type: "+placement;
                 }
                 else if (type is DuctType) option.Kind="Duct";
                 else if (type is PipeType) option.Kind="Pipe";
@@ -56,16 +56,16 @@ namespace IFCInfo
                 if (option.Kind!="Family" && option.Kind!="Unsupported")
                 {
                     option.Supported=true;
-                    option.Placement=option.Kind=="Wall" ? "Wall native: khối tường thẳng đứng, tiết diện đều; bề dày phải khớp Wall Type." :
-                        option.Kind=="Floor" || option.Kind=="Roof" ? "Native từ biên khối sàn/mái phẳng nằm ngang; kiểm tra hình học sau tạo." :
-                        "Tuyến native theo đường tim và kích thước nguồn; có thể nhập chiều dài mới.";
+                    option.Placement=option.Kind=="Wall" ? "Native wall: a uniform vertical wall solid; thickness must match the wall type." :
+                        option.Kind=="Floor" || option.Kind=="Roof" ? "Native element from horizontal floor/roof boundaries; geometry is verified after creation." :
+                        "Native run from the source centerline and dimensions; a new length can be entered.";
                 }
                 types.Add(option);
             }
             foreach (var category in new FilteredElementCollector(doc).WhereElementIsNotElementType().Where(e=>e.Category!=null && SupportedCategories.Contains(e.Category.Id.Number()))
                 .Select(e=>e.Category).GroupBy(c=>c.Id.Number()).Select(g=>g.First()))
                 if (!types.Any(t=>t.CategoryId==category.Id.Number())) types.Add(new ReplacementTypeOption { CategoryId=category.Id.Number(),CategoryName=category.Name,
-                    Label="Không có type có thể đặt",Kind="Unsupported",Placement="Category hiện có phần tử nhưng không có type để đặt mới." });
+                    Label="No placeable type",Kind="Unsupported",Placement="This category contains elements but has no type available for placement." });
             window.ReplacementTypes=types.OrderBy(t=>t.CategoryName).ThenBy(t=>t.Label).ToList();
             window.ReplacementLevels=new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().OrderBy(l=>l.ProjectElevation)
                 .Select(l=>new ReplacementLevelOption { Id=l.Id.Number(),Label=l.Name }).ToList();

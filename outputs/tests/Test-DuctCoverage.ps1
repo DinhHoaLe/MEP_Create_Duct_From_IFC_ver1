@@ -16,36 +16,36 @@ function Check($segments, $status, $full, $expected = 7, $diameter = 0) {
     if ($full -and ($row.CanSelect -or $row.IsSelected)) { throw 'Fully covered duct must not be selectable' }
     $script:checks++
 }
-Check @() 'Chưa tồn tại' $false
-Check @((Segment 1 0 10)) 'Khớp hoàn toàn' $true
-Check @((Segment 1 10 0)) 'Khớp hoàn toàn' $true
-Check @((Segment 1 0 4), (Segment 2 4 10)) 'Khớp hoàn toàn' $true
-Check @((Segment 1 0 4), (Segment 2 5 10)) 'Trùng một phần' $false
-Check @((Segment 1 0 5)) 'Trùng một phần' $false
-Check @((Segment 1 0 10 3)) 'Sai kích thước' $true
-Check @((Segment 1 0 10 2 1 0 8)) 'Sai hệ thống' $true
-Check @((Segment 1 0 10 3 1 0 8)) 'Sai kích thước và hệ thống' $true
-Check @((Segment 1 0 10)) 'Chưa xác định hệ thống' $true $null
-Check @((Segment 1 0 10 3)) 'Sai kích thước' $true $null
-Check @((Segment 1 0 5), (Segment 2 5 10 3)) 'Sai kích thước' $true
-Check @((Segment 1 0 10 2.002)) 'Khớp hoàn toàn' $true
-Check @((Segment 1 0 10 2.004)) 'Sai kích thước' $true
-Check @((Segment 1 0 10 0 0 2)) 'Khớp hoàn toàn' $true 7 2
-Check @((Segment 1 0 10 0 0 3)) 'Sai kích thước' $true 7 2
-Check @((Segment 1 0 10)) 'Sai kích thước' $true 7 2
+Check @() 'Not created' $false
+Check @((Segment 1 0 10)) 'Exact match' $true
+Check @((Segment 1 10 0)) 'Exact match' $true
+Check @((Segment 1 0 4), (Segment 2 4 10)) 'Exact match' $true
+Check @((Segment 1 0 4), (Segment 2 5 10)) 'Partial overlap' $false
+Check @((Segment 1 0 5)) 'Partial overlap' $false
+Check @((Segment 1 0 10 3)) 'Size mismatch' $true
+Check @((Segment 1 0 10 2 1 0 8)) 'System mismatch' $true
+Check @((Segment 1 0 10 3 1 0 8)) 'Size and system mismatch' $true
+Check @((Segment 1 0 10)) 'System unknown' $true $null
+Check @((Segment 1 0 10 3)) 'Size mismatch' $true $null
+Check @((Segment 1 0 5), (Segment 2 5 10 3)) 'Size mismatch' $true
+Check @((Segment 1 0 10 2.002)) 'Exact match' $true
+Check @((Segment 1 0 10 2.004)) 'Size mismatch' $true
+Check @((Segment 1 0 10 0 0 2)) 'Exact match' $true 7 2
+Check @((Segment 1 0 10 0 0 3)) 'Size mismatch' $true 7 2
+Check @((Segment 1 0 10)) 'Size mismatch' $true 7 2
 $oval = Segment 1 0 10
 $oval.UnsupportedShape = $true
-Check @($oval) 'Sai kích thước' $true
+Check @($oval) 'Size mismatch' $true
 $offset = Segment 1 0 10
 $offset.Start = @(0,1,0); $offset.End = @(10,1,0)
-Check @($offset) 'Chưa tồn tại' $false
+Check @($offset) 'Not created' $false
 $flat = Segment 1 0 10
 $flat.Oval = $true
 $result = [IFCInfo.DuctCoverage]::CheckDetails(@(0,0,0),@(10,0,0),[IFCInfo.DuctCoverage+Segment[]]@($flat),(1/304.8),2,1,0,7,$null,$true)
-if ($result.Status -ne 'Khớp hoàn toàn') { throw 'Matching oval should be recognized' }
+if ($result.Status -ne 'Exact match') { throw 'Matching oval should be recognized' }
 $script:checks++
-Check @($flat) 'Sai kích thước' $true
+Check @($flat) 'Size mismatch' $true
 $result = [IFCInfo.DuctCoverage]::CheckDetails(@(0,0,0),@(10,0,0),[IFCInfo.DuctCoverage+Segment[]]@((Segment 1 0 10)),(1/304.8),2,1,0,7,$null,$true)
-if ($result.Status -ne 'Sai kích thước') { throw 'Rectangle must not match oval with the same dimensions' }
+if ($result.Status -ne 'Size mismatch') { throw 'Rectangle must not match oval with the same dimensions' }
 $script:checks++
 Write-Output "$script:checks checks passed."

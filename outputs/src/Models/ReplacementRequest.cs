@@ -1,8 +1,8 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 namespace IFCInfo
 {
-    /// <summary>Lựa chọn Category/Type native, Level và cách đặt theo nguồn IFC.</summary>
+    /// <summary>Native category/type, level and placement choices for an IFC source.</summary>
     public sealed class ReplacementRequest
     {
         public long TypeId { get; set; }

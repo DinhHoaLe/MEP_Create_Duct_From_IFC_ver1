@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -47,6 +47,10 @@ internal static class Program
                 TestNativeCurves();
                 TestDuctGroups();
                 TestLoading();
+                TestResumeSession();
+                TestEmbeddedSettings();
+                TestPersistentCreationAndHeaders();
+                TestIfcClassification();
                 Console.WriteLine("PASS: " + checks + " WPF regression checks.");
                 return 0;
             }
@@ -57,6 +61,16 @@ internal static class Program
             }
             string output = Path.GetFullPath(args[0]);
             Directory.CreateDirectory(output);
+            var tabPreview=new IFCInfoWindow();
+            var tabItems=new List<DuctPlanItem> {Item("304421",false,"LU - ABLUFT","Level 1"),Item("305185",false,"LU - ABLUFT","Level 1")};
+            foreach(var item in tabItems) item.Source.IsSelected=true;
+            tabPreview.AirTerminals=tabItems.Select(i=>i.Source).ToList();
+            var previewTabs=Descendants(tabPreview).OfType<TabControl>().Single(t=>t.Name=="WorkflowTabs");
+            ((TabItem)previewTabs.Items[2]).IsEnabled=true;
+            var tabEditor=Settings(tabItems,false,Choices());
+            tabPreview.OpenDuctSettings(tabEditor,r=>{});
+            Render(tabPreview,output,"duct-settings-tabs.png",1500,850);
+            tabPreview.Close();tabEditor.Close();
             var sourceWindow = new IFCInfoWindow();
             Render(sourceWindow, output, "ifc-source.png", 1100, 790);
             sourceWindow.Close();
@@ -71,7 +85,7 @@ internal static class Program
             }
             var propertyPanel=new IfcPropertiesPanel();
             propertyPanel.ShowSource(new AirTerminalRow { ElementId="123",Name="Rectangular Duct",IfcGuid="ifc-source-guid",
-                SystemType="Supply Air",SystemName="SA-01",Elevation="3200",DataSource="Khớp IFC GUID; IFC gốc",
+                SystemType="Supply Air",SystemName="SA-01",Elevation="3200",DataSource="IFC GUID matched; original IFC",
                 DuctSource=new IfcTerminalSource { WidthMm=500,HeightMm=250,LengthMm=2400 } });
             var propertyWindow=new Window { Content=propertyPanel };
             Render(propertyWindow,output,"ifc-properties.png",350,480); propertyWindow.Close();
@@ -89,7 +103,7 @@ internal static class Program
             var reviewPage=(FrameworkElement)typeof(IFCInfoWindow).GetMethod("CountPage",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(reviewMain,null);
             var reviewViewer=Descendants(reviewPage).OfType<IfcObjectViewer>().Single();
             reviewViewer.ShowModel(PreviewBox());
-            Descendants(reviewPage).OfType<Button>().Single(b=>(b.ToolTip as string)=="Zoom tới nguồn IFC").Visibility=Visibility.Visible;
+            Descendants(reviewPage).OfType<Button>().Single(b=>(b.ToolTip as string)=="Zoom to IFC source").Visibility=Visibility.Visible;
             var reviewWindow=new Window { Content=reviewPage };
             Render(reviewWindow,output,"ifc-review-viewer.png",1450,620);
             reviewViewer.ShowMultipleSelection(2);
@@ -115,11 +129,11 @@ internal static class Program
             Render(batch,output,"duct-new-system.png",1200,900); batch.Close();
 
             var rows = new List<DuctRunRow> {
-                new DuctRunRow { SourceId = "123", IfcGuid = "sample-guid", TargetId = "456", Status = "Đã tạo", Success = true }
+                new DuctRunRow { SourceId = "123", IfcGuid = "sample-guid", TargetId = "456", Status = "Created", Success = true }
             };
             var resultType = typeof(IFCInfoWindow).Assembly.GetType("IFCInfo.DuctCreationResultWindow", true);
             var result = (Window)Activator.CreateInstance(resultType, BindingFlags.Instance | BindingFlags.NonPublic,
-                null, new object[] { rows, false, (Action)(() => { }), "Kết quả kiểm tra" }, null);
+                null, new object[] { rows, false, (Action)(() => { }), "Test results" }, null);
             Render(result, output, "duct-results.png", 1050, 600);
             result.Close();
             Console.WriteLine("Rendered IFC/Duct settings and result windows: " + output);
@@ -181,6 +195,53 @@ internal static class Program
         Assert(DuctRunRow.SuccessfulTargetIds(rows).Count==0, "Rollback must leave no selected targets");
     }
 
+    private static void TestResumeSession()
+    {
+        var link = new LinkOption { Id=101, Name="Project3.ifc", IsLoaded=true, IfcPath="remembered-source.ifc" };
+        long categoryId = (long)Autodesk.Revit.DB.BuiltInCategory.OST_DuctCurves;
+        int loads = 0;
+        for (int run=0; run<2; run++)
+        {
+            int currentRun=run;
+            var main = new IFCInfoWindow
+            {
+                Links=new List<LinkOption> { link }, InitialLinkId=101, InitialCategoryId=categoryId,
+                Opacity=0, ShowInTaskbar=false
+            };
+            main.LoadLink=option =>
+            {
+                Assert(ReferenceEquals(option,link),"Resume must retain the link option and remembered IFC path");
+                main.Categories=new List<CategoryOption> { new CategoryOption { Id=categoryId,Name="Ducts" } };
+                main.CanCreateDucts=true;
+                main.LoadCategory=category =>
+                {
+                    loads++;
+                    main.AirTerminals=new List<AirTerminalRow> {
+                        new AirTerminalRow { ElementId="1",Name="First duct",DuctExistence=currentRun==0?"Not created":"Exact match" },
+                        new AirTerminalRow { ElementId="2",Name="Next duct",DuctExistence="Not created" }
+                    };
+                    main.AirTerminalCount=2;
+                };
+                main.PrepareDucts=rows => new DuctRequest { Items=rows.Select(row=>new DuctPlanItem {Source=row}).ToList() };
+            };
+            main.Loaded+=(s,e)=>main.Dispatcher.BeginInvoke(new Action(()=>
+            {
+                Assert(main.SelectedLink==link && main.SelectedCategory.Id==categoryId,"Resume must restore the selected link/category");
+                Assert(main.Icon!=null && main.Icon.Width>0,"The embedded project icon must load without a loose PNG");
+                Assert(main.DuctCreationRequest==null && main.Replacement==null,"Resume must not reuse a previous creation request");
+                Assert(main.AirTerminals[0].CanSelect==(currentRun==0),"Refreshed fully covered ducts must not be selectable again");
+                Assert(main.AirTerminals[1].CanSelect,"Another source must remain available for the next run");
+                main.AirTerminals[currentRun].IsSelected=true;
+                Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Duct settings →")
+                    .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            }));
+            main.ShowDialog();
+            Assert(main.DuctCreationRequest.Items.Count==1 && main.DuctCreationRequest.Items[0].Source.ElementId==(currentRun+1).ToString(),
+                "Each run must submit only its newly checked source");
+        }
+        Assert(loads==2,"Resuming must reload source comparison data for each run");
+    }
+
     private static void TestFamilyLoader()
     {
         var category=(long)Autodesk.Revit.DB.BuiltInCategory.OST_DuctFitting;
@@ -237,7 +298,7 @@ internal static class Program
         panel.ShowSources(new[] { row,other });
         var combined=grid.Items.Cast<KeyValuePair<string,string>>().ToDictionary(p=>p.Key,p=>p.Value);
         Assert(combined["Instance / Pset_Test / Reference"]=="IFC value","Equal parameters must display one value");
-        Assert(combined["Element ID trong link"]=="<varies>","Different IDs must display varies");
+        Assert(combined["Element ID in link"]=="<varies>","Different IDs must display varies");
         other.IfcProperties[0].Value="different";
         panel.ShowSources(new[] { row,other });
         Assert(grid.Items.Cast<KeyValuePair<string,string>>().Single(p=>p.Key=="Instance / Pset_Test / Reference").Value=="<varies>","Different parameter values must display varies");
@@ -262,7 +323,7 @@ internal static class Program
         main.AirTerminalCount=2;
         main.CanCreateDucts=true;
         int navigations=0;
-        main.NavigateSource=(selected,action)=> { if(selected==row && action=="Zoom tới nguồn IFC") navigations++; };
+        main.NavigateSource=(selected,action)=> { if(selected==row && action=="Zoom to IFC source") navigations++; };
         var page=(FrameworkElement)typeof(IFCInfoWindow).GetMethod("CountPage",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(main,null);
         var grids=Descendants(page).OfType<DataGrid>().ToList();
         var source=grids.Single(g=>g.Name!="IfcPropertyValues");
@@ -271,12 +332,12 @@ internal static class Program
             "Step 2 must show source systems and section shape");
         source.SelectedItem=row;
         var buttons=Descendants(main).OfType<Button>().Concat(Descendants(page).OfType<Button>()).Distinct().ToList();
-        var zoom=buttons.Single(b=>(b.ToolTip as string)=="Zoom tới nguồn IFC");
+        var zoom=buttons.Single(b=>(b.ToolTip as string)=="Zoom to IFC source");
         Assert(zoom.IsEnabled,"Selecting a source row must enable IFC zoom review");
         zoom.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Assert(navigations==1 && main.NavigationRow==null,"IFC zoom callback must keep the tool open");
-        Assert(!buttons.Any(b=>(b.Content as string)=="Đóng"),"Main window must rely on the title-bar close button");
-        var back=buttons.Single(b=>(b.Content as string)=="← Quay lại");
+        Assert(!buttons.Any(b=>(b.Content as string)=="Close"),"Main window must rely on the title-bar close button");
+        var back=buttons.Single(b=>(b.Content as string)=="← Back");
         Assert(back.Parent is WrapPanel && Grid.GetColumn((WrapPanel)back.Parent)==0,"Back button must stay in the left footer");
         var propertyGrid=grids.Single(g=>g.Name=="IfcPropertyValues");
         Assert(propertyGrid.Items.GroupDescriptions.Count>0,"IFC properties must be grouped like Revit Properties");
@@ -285,27 +346,27 @@ internal static class Program
         Assert(double.IsNaN(viewer.Height) && viewer.VerticalAlignment==VerticalAlignment.Stretch,
             "Viewer height must stretch with the table and Properties");
         source.SelectedItems.Add(other);
-        Assert(!zoom.IsEnabled && viewer.StatusText.Contains("nhiều đối tượng"),"Multiple selections must clear the viewer and disable IFC zoom");
+        Assert(!zoom.IsEnabled && viewer.StatusText.Contains("Multiple objects"),"Multiple selections must clear the viewer and disable IFC zoom");
         Assert(Descendants(viewer).OfType<System.Windows.Shapes.Path>().Any(p=>p.Width==72 && p.Visibility==Visibility.Visible),
             "Multiple selections must show a centered viewer symbol instead of an empty panel");
         var filter=buttons.Single(b=>b.Name=="FilterSources");
         filter.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         var filterHeaders=filter.ContextMenu.Items.OfType<MenuItem>().Select(i=>i.Header as string).ToList();
-        Assert(filterHeaders.Contains("Đối chiếu Duct") && !filterHeaders.Contains("System Type"),
+        Assert(filterHeaders.Contains("Duct comparison") && !filterHeaders.Contains("System Type"),
             "Filter menu must follow visible table columns");
         filter.ContextMenu.IsOpen=false;
         var sort=buttons.Single(b=>b.Name=="SortSources");
         sort.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         var sortHeaders=sort.ContextMenu.Items.OfType<MenuItem>().Select(i=>i.Header as string).ToList();
-        Assert(sortHeaders.Any(h=>h.StartsWith("Chọn")) && sortHeaders.Any(h=>h.StartsWith("Đối chiếu Duct")) &&
-            sortHeaders.Any(h=>h.StartsWith("Element ID")) && sortHeaders.Any(h=>h.StartsWith("Phần tử")) &&
+        Assert(sortHeaders.Any(h=>h.StartsWith("Select")) && sortHeaders.Any(h=>h.StartsWith("Duct comparison")) &&
+            sortHeaders.Any(h=>h.StartsWith("Element ID")) && sortHeaders.Any(h=>h.StartsWith("Element")) &&
             !sortHeaders.Any(h=>h.StartsWith("System")),"Sort menu must follow visible table columns");
         sort.ContextMenu.IsOpen=false;
         row.ElementId="10"; other.ElementId="2";
         sort.ContextMenu.Items.OfType<MenuItem>().Single(i=>(string)i.Header=="Element ID ↑").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         Assert(source.Items[0]==other,"IDs must sort numerically, with 2 before 10");
         row.IsSelected=true; other.IsSelected=true;
-        filter.ContextMenu.Items.OfType<MenuItem>().Single(i=>(string)i.Header=="Đang tích chọn").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        filter.ContextMenu.Items.OfType<MenuItem>().Single(i=>(string)i.Header=="Checked").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         row.IsSelected=false;
         page.Dispatcher.Invoke(new Action(()=>{}),DispatcherPriority.ContextIdle);
         Assert(source.Items.Count==1 && source.Items[0]==other,"Selected filter must refresh after unchecking a row");
@@ -333,10 +394,89 @@ internal static class Program
         tool.Close(); owner.Close();
     }
 
+    private static void TestPersistentCreationAndHeaders()
+    {
+        var main=new IFCInfoWindow {Opacity=0,ShowInTaskbar=false};
+        var a=new AirTerminalRow {ElementId="1"};
+        var b=new AirTerminalRow {ElementId="2"};
+        var blocked=new AirTerminalRow {ElementId="3",DuctExistence="Exact match"};
+        main.AirTerminals=new List<AirTerminalRow> {a,b};
+        var page=(FrameworkElement)typeof(IFCInfoWindow).GetMethod("CountPage",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(main,null);
+        var grid=Descendants(page).OfType<DataGrid>().Single(g=>g.Name!="IfcPropertyValues");
+        var header=(CheckBox)grid.Columns[0].Header;
+        header.IsChecked=true;header.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(a.IsSelected && b.IsSelected,"Source header checks all eligible rows");
+        header.IsChecked=false;header.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(!a.IsSelected && !b.IsSelected,"Source header clears all eligible rows");
+        var items=new List<DuctPlanItem> {Item("1",false,"Supply Air","Level 1"),Item("2",false,"Supply Air","Level 1")};
+        var editor=Settings(items,false,Choices());
+        var preview=Descendants(editor).OfType<DataGrid>().Single();
+        var include=(CheckBox)preview.Columns[0].Header;
+        include.IsChecked=false;include.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(items.All(i=>!i.Include),"Include header excludes every source");
+        include.IsChecked=true;include.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(items.All(i=>i.Include),"Include header includes every source");
+        items[0].Include=false;
+        Assert(include.IsChecked==null,"Include header shows mixed selection");
+        include.IsChecked=false;include.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(items.All(i=>i.Include),"Mixed Include selection selects all on next click");
+        var footerButtons=Descendants(editor).OfType<Button>().Where(x=>x.Content is string).Select(x=>(string)x.Content).ToList();
+        int systemIndex=footerButtons.IndexOf("System");
+        Assert(systemIndex>=0 && footerButtons[systemIndex+1].StartsWith("Create ") && footerButtons[systemIndex+2]=="Back" && footerButtons[systemIndex+3]=="Close","Settings footer order: System Create Back Close");
+        editor.Close();
+        var tabs=Descendants(main).OfType<TabControl>().Single(t=>t.Name=="WorkflowTabs");
+        ((TabItem)tabs.Items[1]).IsEnabled=true;
+        int runs=0;var retained=main.AirTerminals;
+        main.RunDuctCreation=()=>{runs++;Assert(main.DuctCreationRequest!=null,"Execution callback receives pending request");};
+        main.Show();
+        typeof(IFCInfoWindow).GetMethod("SubmitDuctRequest",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(main,new object[] {new DuctRequest()});
+        Assert(runs==1 && main.IsVisible && ReferenceEquals(retained,main.AirTerminals),"Creating ducts must preserve the same open window and rows");
+        Assert(main.DuctCreationRequest==null && tabs.SelectedIndex==1,"Completed requests clear without restarting the tool");
+        page.RaiseEvent(new RoutedEventArgs(FrameworkElement.UnloadedEvent));
+        main.Close();
+    }
+    private static void TestIfcClassification()
+    {
+        string evidence;
+        var row=new AirTerminalRow {SystemType="LU - ABLUFT"};
+        Assert(IfcHvacClassification.Resolve(new[] {row},out evidence)=="ExhaustAir" && evidence.Contains("Suggested"),"Abluft must suggest an editable exhaust classification");
+        row.IfcProperties.Add(new IfcPropertyValue {Name="System Classification",Value="Return Air"});
+        Assert(IfcHvacClassification.Resolve(new[] {row},out evidence)=="ReturnAir" && evidence.Contains("properties"),"Explicit IFC classification must take priority over names");
+        row.IfcProperties.Add(new IfcPropertyValue {Name="SystemClassification",Value="SupplyAir"});
+        Assert(IfcHvacClassification.Resolve(new[] {row},out evidence)==null,"Conflicting properties must not be guessed");
+        Assert(IfcHvacClassification.Resolve(new[] {new AirTerminalRow {SystemType="VENTILATION"}},out evidence)==null,"Generic ventilation must not default to supply air");
+        Assert(IfcHvacClassification.Resolve(new[] {new AirTerminalRow {SystemType="Supply"},new AirTerminalRow {SystemType="Return"}},out evidence)==null,"Mixed groups must require review");
+    }
+    private static void TestEmbeddedSettings()
+    {
+        var main=new IFCInfoWindow();
+        var source=new AirTerminalRow {ElementId="123",IsSelected=true};
+        main.AirTerminals=new List<AirTerminalRow> {source};
+        var tabs=Descendants(main).OfType<TabControl>().Single(t=>t.Name=="WorkflowTabs");
+        var elements=(TabItem)tabs.Items[1]; elements.IsEnabled=true;
+        var settingsTab=(TabItem)tabs.Items[2]; settingsTab.IsEnabled=true;
+        var editor=Settings(new List<DuctPlanItem> {Item("123",false,"Supply Air","Level 1")},false,Choices());
+        main.OpenDuctSettings(editor,r=>{});
+        Assert(tabs.SelectedItem==settingsTab && !editor.IsVisible,"Duct settings must be embedded without another visible window");
+        var content=settingsTab.Content;
+        var grid=Descendants((DependencyObject)content).OfType<DataGrid>().Single();
+        Assert(grid.Parent is Grid && Grid.GetRow(grid)==0 && Grid.GetColumn((Grid)grid.Parent)==1,"Include table must be fixed above right-side options");
+        Assert(double.IsNaN(grid.Height),"Include table must stretch vertically");
+        tabs.SelectedItem=elements; tabs.SelectedItem=settingsTab;
+        Assert(ReferenceEquals(settingsTab.Content,content),"Tab switching must preserve unchanged settings");
+        int prepared=0;
+        main.CanCreateDucts=true;
+        main.PrepareDucts=rows=> {prepared++;return null;};
+        tabs.SelectedItem=elements;
+        main.AirTerminals.Add(new AirTerminalRow {ElementId="456",IsSelected=true});
+        tabs.SelectedItem=settingsTab;
+        Assert(prepared==1 && settingsTab.Content==null && tabs.SelectedItem==elements,"Changed selection must invalidate stale settings");
+        main.Close();editor.Close();
+    }
     private static void TestExports()
     {
         var rows=new List<AirTerminalRow> {
-            new AirTerminalRow { ElementId="2",Name="Ống \"A\"",Elevation="100",IsSelected=true },
+            new AirTerminalRow { ElementId="2",Name="Duct \"A\"",Elevation="100",IsSelected=true },
             new AirTerminalRow { ElementId="10",Name="=1+1",Elevation="200",IsSelected=true },
             new AirTerminalRow { ElementId="99",Name="Excluded" } };
         string folder=Path.Combine(Path.GetTempPath(),"IfcExportTests-"+Guid.NewGuid());
@@ -405,7 +545,7 @@ internal static class Program
         owner.Show();
         var type=typeof(IFCInfoWindow).Assembly.GetType("IFCInfo.LoadingWindow",true);
         var busy=(IDisposable)type.GetMethod("ShowWhile",BindingFlags.Static|BindingFlags.NonPublic)
-            .Invoke(null,new object[] { owner,"Đang kiểm tra","Kiểm tra trạng thái chờ" });
+            .Invoke(null,new object[] { owner,"Checking","Checking loading state" });
         Assert(!owner.IsEnabled,"Loading prevents duplicate user actions");
         busy.Dispose();
         Assert(owner.IsEnabled,"Loading restores input after completion");
@@ -421,8 +561,8 @@ internal static class Program
         var oval=Item("5",false,"Supply Air","L1"); oval.Oval=true;
         var items=new List<DuctPlanItem> { round,square,rect,exhaust,oval };
         Assert(items.Select(i=>i.GroupKey).Distinct().Count()==5,"Separate shape and system combinations");
-        Assert(new AirTerminalRow { DuctSource=new IfcTerminalSource { WidthMm=200,HeightMm=200 } }.Shape=="Vuông","Recognize square IFC sections");
-        Assert(new AirTerminalRow().Shape=="Chưa xác định","Do not infer missing section metadata");
+        Assert(new AirTerminalRow { DuctSource=new IfcTerminalSource { WidthMm=200,HeightMm=200 } }.Shape=="Square","Recognize square IFC sections");
+        Assert(new AirTerminalRow().Shape=="Unknown","Do not infer missing section metadata");
         var rectTypes=new List<DuctChoice> { new DuctChoice { Id=20,Name="Rect A" },new DuctChoice { Id=21,Name="Rect B" } };
         var window=new DuctCreationWindow(items,new List<string>(),new List<DuctChoice> { new DuctChoice { Id=10,Name="Round" } },
             rectTypes,Choices(),Choices(),new List<DuctChoice>(),new DuctSettingsData(),false,
@@ -440,15 +580,38 @@ internal static class Program
                 foreach(var group in groups)
                 {
                     var type=Descendants(group).OfType<ComboBox>().Single(x=>x.Name=="GroupDuctType");
-                    if(type.Items.Count==2) type.SelectedIndex=group.Header.ToString().StartsWith("Vuông")?1:0;
+                    if(type.Items.Count==2) type.SelectedIndex=group.Header.ToString().StartsWith("Square")?1:0;
                 }
                 var newGroup=groups.Single(x=>x.Header.ToString().Contains("NEW EXHAUST"));
                 Descendants(newGroup).OfType<CheckBox>().Single(x=>x.Name=="CreateNewSystem").IsChecked=true;
                 window.UpdateLayout();
-                var submit=Descendants(window).OfType<Button>().Single(x=>(x.Content as string)=="Tạo 5 Duct");
+                var submit=Descendants(window).OfType<Button>().Single(x=>(x.Content as string)=="Create 5 Duct");
+                var autoClassification=Descendants(newGroup).OfType<ComboBox>().Single(x=>x.Name=="SystemClassification");
+                Assert((string)autoClassification.SelectedItem=="ExhaustAir","IFC exhaust name should prefill classification");
+                var followIfc=Descendants(newGroup).OfType<CheckBox>().Single(x=>x.Name=="FollowIfcClassification");
+                var template=Descendants(newGroup).OfType<ComboBox>().Single(x=>x.Name=="SystemTemplate");
+                Assert(!autoClassification.IsEnabled && !template.IsEnabled,"Follow IFC locks both template and classification");
+                followIfc.IsChecked=false;
+                Assert(autoClassification.IsEnabled && template.IsEnabled,"Manual mode unlocks both fields");
+                autoClassification.SelectedIndex=-1;
                 submit.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                Assert(window.Request==null,"New systems require explicit classification");
+                Assert(window.Request==null,"Unresolved classification must still be validated");
                 Descendants(newGroup).OfType<ComboBox>().Single(x=>x.Name=="SystemClassification").SelectedItem="ExhaustAir";
+                var mode=Descendants(window).OfType<ComboBox>().Single(x=>x.Name=="SystemSetupMode");
+                var common=Descendants(window).OfType<ComboBox>().Single(x=>x.Name=="SharedHvacSystem");
+                mode.SelectedIndex=1;
+                Assert(groups.All(g=>!Descendants(g).OfType<ComboBox>().Single(x=>x.Name=="GroupSystemType").IsEnabled),"Auto locks every group system");
+                submit.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Assert(window.Request==null,"Auto existing requires a shared type");
+                common.SelectedIndex=0;
+                Assert(groups.All(g=>ReferenceEquals(Descendants(g).OfType<ComboBox>().Single(x=>x.Name=="GroupSystemType").SelectedItem,common.SelectedItem)),"Shared HVAC selection applies to every group");
+                var strategy=Descendants(window).OfType<ComboBox>().Single(x=>x.Name=="AutoSystemStrategy");
+                strategy.SelectedIndex=1;
+                Assert(groups.All(g=>!Descendants(g).OfType<CheckBox>().Single(x=>x.Name=="CreateNewSystem").IsEnabled),"IFC auto mapping locks new-system controls");
+                Assert(Descendants(newGroup).OfType<ComboBox>().Single(x=>x.Name=="SystemClassification").SelectedItem.ToString()=="ExhaustAir","IFC auto mapping uses source classification");
+                mode.SelectedIndex=0;
+                var projectBox=Descendants(newGroup).OfType<ComboBox>().Single(x=>x.Name=="GroupSystemType");
+                Assert(Descendants(newGroup).OfType<CheckBox>().Single(x=>x.Name=="CreateNewSystem").IsChecked==true && projectBox.SelectedItem==null,"Manual restores prior configuration");
                 submit.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 var request=window.Request;
                 Assert(request!=null && request.DuctTypes.Count==5,"Submit all selected groups in one request");
@@ -487,7 +650,7 @@ internal static class Program
                 Assert(window.Request == null, "Selected groups with missing mappings must be rejected");
                 excludedRound.Include = false;
                 excludedSystem.Include = false;
-                Assert((string)submit.Content == (updating ? "Cập nhật 1 Duct" : "Tạo 1 Duct"), "Button count must track selection");
+                Assert((string)submit.Content == (updating ? "Update 1 Duct" : "Create 1 Duct"), "Button count must track selection");
                 selected.Include = false;
                 Assert(!submit.IsEnabled, "No selection must disable submission");
                 selected.Include = true;
@@ -500,7 +663,7 @@ internal static class Program
                 Assert(request.Levels.Count == 1 && request.Levels.ContainsKey("Level 1"), "Exclude unused level mappings");
                 Assert(request.Worksets.Count == 1 && request.Worksets.ContainsKey("Rectangular|Supply Air"), "Exclude unused workset mappings");
                 Assert(request.Skipped.Count == 2 && request.Skipped.Select(r => r.SourceId).OrderBy(x => x).SequenceEqual(new[] { "124", "125" }), "All unchecked sources must be reported");
-                Assert(request.Skipped.All(r => r.Status == "Không chọn" && !string.IsNullOrEmpty(r.IfcGuid)), "Skipped rows retain identity and status");
+                Assert(request.Skipped.All(r => r.Status == "Unchecked" && !string.IsNullOrEmpty(r.IfcGuid)), "Skipped rows retain identity and status");
             }
             catch (Exception ex) { failure = ex; }
             finally { window.Close(); }

@@ -45,7 +45,7 @@ namespace IFCInfo
                         var row=new DuctRunRow { RunId=run,SourceId=item.Source.ElementId,IfcGuid=item.Source.IfcGuid,IfcPsets=IfcPropertyStorage.Text(item.Source) }; rows.Add(row);
                         try
                         {
-                            if (item.ExistingId==0 && existing.Contains(item.Key)) throw new InvalidOperationException("Nguồn đã được tạo trước đó.");
+                            if (item.ExistingId==0 && existing.Contains(item.Key)) throw new InvalidOperationException("This source has already been created.");
                             long id=0, resolvedSystem=0;
                             RunTransaction(doc,"IFC - "+item.Source.ElementId,()=>
                             {
@@ -54,9 +54,9 @@ namespace IFCInfo
                             });
                             request.SystemTypes[item.GroupKey]=resolvedSystem;
                             existing.Add(item.Key); successful[id]=item; row.TargetId=id.ToString(); row.Success=true;
-                            row.Status=item.ExistingId>0 ? "Đã cập nhật" : "Đã tạo";
+                            row.Status=item.ExistingId>0 ? "Updated" : "Created";
                         }
-                        catch (Exception ex) { row.Status="Lỗi"; row.Reason=ex.Message; if (!request.KeepSuccessful) throw; }
+                        catch (Exception ex) { row.Status="Error"; row.Reason=ex.Message; if (!request.KeepSuccessful) throw; }
                     }
                     if (request.CreateFittings || request.ConnectTerminals) DuctConnections.Execute(doc,successful.Keys.ToList(),request,rows,run);
                     if (successful.Count>0)
@@ -70,32 +70,32 @@ namespace IFCInfo
                         }
                         catch (Exception ex)
                         {
-                            rows.Add(new DuctRunRow { Status="Lỗi lưu trạng thái cuối",Reason=ex.Message+" Các duct đổi sau khi nối sẽ bị cảnh báo khi cập nhật IFC lần sau." });
+                            rows.Add(new DuctRunRow { Status="Final snapshot save error",Reason=ex.Message+" Ducts changed by connections will be flagged during the next IFC update." });
                             if (!request.KeepSuccessful) throw;
                         }
                     }
                     if (request.SaveSettings)
                     {
                         try { RunTransaction(doc,"IFC - Save mappings",()=>DuctProjectSettings.Save(doc,request)); }
-                        catch (Exception ex) { rows.Add(new DuctRunRow { Status="Lỗi lưu cấu hình",Reason=ex.Message }); if (!request.KeepSuccessful) throw; }
+                        catch (Exception ex) { rows.Add(new DuctRunRow { Status="Settings save error",Reason=ex.Message }); if (!request.KeepSuccessful) throw; }
                     }
-                    if (group.Assimilate()!=TransactionStatus.Committed) throw new InvalidOperationException("Không hoàn tất transaction group.");
+                    if (group.Assimilate()!=TransactionStatus.Committed) throw new InvalidOperationException("Could not complete the transaction group.");
                 }
                 catch (Exception ex)
                 {
                     if (group.GetStatus()==TransactionStatus.Started) group.RollBack(); rolledBack=true;
-                    foreach (var row in rows.Where(r=>r.Success)) { row.Success=false; row.TargetId=""; row.Status="Đã hoàn tác"; row.Reason="Toàn bộ lượt đã hoàn tác: "+ex.Message; }
-                    successful.Clear(); rows.Add(new DuctRunRow { Status="Lượt đã hoàn tác",Reason=ex.Message });
+                    foreach (var row in rows.Where(r=>r.Success)) { row.Success=false; row.TargetId=""; row.Status="Rolled back"; row.Reason="The entire run was rolled back: "+ex.Message; }
+                    successful.Clear(); rows.Add(new DuctRunRow { Status="Run rolled back",Reason=ex.Message });
                 }
             }
             foreach (var item in request.Items.Where(i=>!rows.Any(r=>r.SourceId==i.Source.ElementId)))
-                rows.Add(new DuctRunRow { SourceId=item.Source.ElementId,IfcGuid=item.Source.IfcGuid,Status="Chưa thực hiện",Reason="Lượt đã dừng và hoàn tác." });
+                rows.Add(new DuctRunRow { SourceId=item.Source.ElementId,IfcGuid=item.Source.IfcGuid,Status="Not processed",Reason="The run stopped and was rolled back." });
             foreach (var row in rows) row.RunId=run;
             var ids=DuctRunRow.SuccessfulTargetIds(rows).Select(id=>ElementIds.Create(id))
                 .Where(id => { var e=doc.GetElement(id); return e is Duct || e?.Category?.Id.Number()==(long)BuiltInCategory.OST_DuctFitting; }).ToList();
             ui.Selection.SetElementIds(ids);
             var result=new DuctCreationResultWindow(rows,rolledBack,()=>ui.Selection.SetElementIds(ids));
-            new System.Windows.Interop.WindowInteropHelper(result).Owner=ui.Application.MainWindowHandle; result.ShowDialog();
+            if(window.IsVisible)result.Owner=window; else new System.Windows.Interop.WindowInteropHelper(result).Owner=ui.Application.MainWindowHandle; result.ShowDialog();
         }
         internal static void RunTransaction(Document doc,string name,Action action)
         {
@@ -103,7 +103,7 @@ namespace IFCInfo
             {
                 t.Start(); var failures=new RollbackErrors();
                 t.SetFailureHandlingOptions(t.GetFailureHandlingOptions().SetFailuresPreprocessor(failures).SetClearAfterRollback(true));
-                try { action(); if (t.Commit()!=TransactionStatus.Committed) throw new InvalidOperationException("Revit từ chối thay đổi. "+failures.Message); }
+                try { action(); if (t.Commit()!=TransactionStatus.Committed) throw new InvalidOperationException("Revit rejected the change. "+failures.Message); }
                 catch { if (t.GetStatus()==TransactionStatus.Started) t.RollBack(); throw; }
             }
         }
@@ -115,7 +115,7 @@ namespace IFCInfo
                     Start=new[] { d.Line.GetEndPoint(0).X,d.Line.GetEndPoint(0).Y,d.Line.GetEndPoint(0).Z },
                     End=new[] { d.Line.GetEndPoint(1).X,d.Line.GetEndPoint(1).Y,d.Line.GetEndPoint(1).Z } });
             var overlap=DuctCoverage.Check(new[] { item.Start.X,item.Start.Y,item.Start.Z },new[] { item.End.X,item.End.Y,item.End.Z },others,1.0/304.8);
-            if (overlap.Ids.Count>0) throw new InvalidOperationException("Đường tim chồng duct ID "+string.Join(",",overlap.Ids)+"; không tạo/cập nhật chồng ống.");
+            if (overlap.Ids.Count>0) throw new InvalidOperationException("Centerline overlaps duct ID "+string.Join(",",overlap.Ids)+"; overlapping ducts will not be created or updated.");
             string key=item.GroupKey;
             var system=ResolveSystem(doc,request,key);
             long typeId;
@@ -123,19 +123,19 @@ namespace IFCInfo
             var type=ElementIds.Create(typeId);
             var ductType=doc.GetElement(type) as DuctType;
             var expectedShape=item.Round?ConnectorProfileType.Round:item.Oval?ConnectorProfileType.Oval:ConnectorProfileType.Rectangular;
-            if (ductType==null || ductType.Shape!=expectedShape) throw new InvalidOperationException("Duct Type không đúng tiết diện "+item.ShapeName+".");
+            if (ductType==null || ductType.Shape!=expectedShape) throw new InvalidOperationException("Duct type does not match profile "+item.ShapeName+".");
             var levels=new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().OrderBy(l=>l.ProjectElevation).ToList();
             long mapped;
-            var level=request.Levels.TryGetValue(item.LevelKey??"Không có Level nguồn",out mapped) && mapped>0 ? doc.GetElement(ElementIds.Create(mapped)) as Level
+            var level=request.Levels.TryGetValue(item.LevelKey??"No source level",out mapped) && mapped>0 ? doc.GetElement(ElementIds.Create(mapped)) as Level
                 : levels.LastOrDefault(l=>l.ProjectElevation<=Math.Min(item.Start.Z,item.End.Z)+Tolerance)??levels.FirstOrDefault();
-            if (level==null) throw new InvalidOperationException("Level đích không tồn tại.");
+            if (level==null) throw new InvalidOperationException("The target level does not exist.");
             Duct duct;
             if (item.ExistingId>0)
             {
                 duct=doc.GetElement(ElementIds.Create(item.ExistingId)) as Duct;
-                if (duct==null) throw new InvalidOperationException("Duct cần cập nhật đã bị xóa.");
-                if (!DuctRevision.Equal(DuctRevision.Get(duct,"Actual"),DuctRevision.Actual(duct))) throw new InvalidOperationException("Duct đã sửa trong Revit; không ghi đè.");
-                if (duct.Pinned || DuctRevision.Connected(duct)) throw new InvalidOperationException("Duct đang ghim hoặc nối mạng; không cập nhật tự động.");
+                if (duct==null) throw new InvalidOperationException("The duct to update has been deleted.");
+                if (!DuctRevision.Equal(DuctRevision.Get(duct,"Actual"),DuctRevision.Actual(duct))) throw new InvalidOperationException("The duct was edited in Revit; it will not be overwritten.");
+                if (duct.Pinned || DuctRevision.Connected(duct)) throw new InvalidOperationException("The duct is pinned or connected; automatic update is disabled.");
                 duct.ChangeTypeId(type); SetId(duct,BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM,system); SetId(duct,BuiltInParameter.RBS_START_LEVEL_PARAM,level.Id);
                 ((LocationCurve)duct.Location).Curve=Line.CreateBound(item.Start,item.End);
             }
@@ -144,7 +144,7 @@ namespace IFCInfo
             if (doc.IsWorkshared && request.Worksets.TryGetValue(key,out workset) && workset>0)
             {
                 var p=duct.get_Parameter(BuiltInParameter.ELEM_PARTITION_PARAM);
-                if (p==null || p.IsReadOnly || !p.Set((int)workset)) throw new InvalidOperationException("Không đặt được Workset.");
+                if (p==null || p.IsReadOnly || !p.Set((int)workset)) throw new InvalidOperationException("Could not set the workset.");
             }
             if (item.Round) SetSize(duct,BuiltInParameter.RBS_CURVE_DIAMETER_PARAM,item.Diameter);
             else
@@ -157,17 +157,17 @@ namespace IFCInfo
             }
             doc.Regenerate(); var line=(duct.Location as LocationCurve)?.Curve as Line;
             if (line==null || !((line.GetEndPoint(0).DistanceTo(item.Start)<Tolerance && line.GetEndPoint(1).DistanceTo(item.End)<Tolerance) ||
-                (line.GetEndPoint(1).DistanceTo(item.Start)<Tolerance && line.GetEndPoint(0).DistanceTo(item.End)<Tolerance))) throw new InvalidOperationException("Đường tim không khớp nguồn IFC.");
+                (line.GetEndPoint(1).DistanceTo(item.Start)<Tolerance && line.GetEndPoint(0).DistanceTo(item.End)<Tolerance))) throw new InvalidOperationException("The centerline does not match the IFC source.");
             if (!item.Round && Math.Abs(duct.ConnectorManager.Connectors.Cast<Connector>().First(c=>c.ConnectorType==ConnectorType.End).CoordinateSystem.BasisX.DotProduct(item.WidthAxis))<1-1e-6)
-                throw new InvalidOperationException("Góc tiết diện không khớp IFC.");
-            if (duct.GetTypeId()!=type || duct.get_Parameter(BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM)?.AsElementId()!=system) throw new InvalidOperationException("Duct Type hoặc System Type không khớp ánh xạ.");
-            if (duct.ReferenceLevel?.Id!=level.Id) throw new InvalidOperationException("Level không khớp ánh xạ.");
+                throw new InvalidOperationException("Profile orientation does not match IFC.");
+            if (duct.GetTypeId()!=type || duct.get_Parameter(BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM)?.AsElementId()!=system) throw new InvalidOperationException("Duct type or system type does not match the mapping.");
+            if (duct.ReferenceLevel?.Id!=level.Id) throw new InvalidOperationException("The level does not match the mapping.");
             if (doc.IsWorkshared && request.Worksets.TryGetValue(key,out workset) && workset>0 && duct.WorksetId.IntegerValue!=workset)
-                throw new InvalidOperationException("Workset không khớp ánh xạ.");
+                throw new InvalidOperationException("The workset does not match the mapping.");
             if (item.Round ? !DuctGeometryReader.Near(duct.get_Parameter(BuiltInParameter.RBS_CURVE_DIAMETER_PARAM).AsDouble(),item.Diameter) :
                 !DuctGeometryReader.Near(duct.get_Parameter(BuiltInParameter.RBS_CURVE_WIDTH_PARAM).AsDouble(),item.Width) ||
                 !DuctGeometryReader.Near(duct.get_Parameter(BuiltInParameter.RBS_CURVE_HEIGHT_PARAM).AsDouble(),item.Height))
-                throw new InvalidOperationException("Kích thước sau regenerate không khớp IFC.");
+                throw new InvalidOperationException("Dimensions after regeneration do not match IFC.");
             RecordSource(duct,item.Key,item.Source,system.Number());
             IfcPropertyStorage.Save(duct,item.Source);
             var comments=duct.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
@@ -192,21 +192,21 @@ namespace IFCInfo
             {
                 long id;
                 if (!request.SystemTypes.TryGetValue(key,out id) || !(doc.GetElement(ElementIds.Create(id)) is MechanicalSystemType))
-                    throw new InvalidOperationException("System Type đích không còn tồn tại.");
+                    throw new InvalidOperationException("The target system type no longer exists.");
                 return ElementIds.Create(id);
             }
             var template=proposed.TemplateId>0 ? doc.GetElement(ElementIds.Create(proposed.TemplateId)) as MechanicalSystemType : null;
             MEPSystemClassification classification;
-            if (proposed.TemplateId>0 && template==null) throw new InvalidOperationException("Hệ thống mẫu đã bị xóa.");
+            if (proposed.TemplateId>0 && template==null) throw new InvalidOperationException("The template system has been deleted.");
             if (template!=null) classification=template.SystemClassification;
             else if (!Enum.TryParse(proposed.Classification,out classification) ||
                 !new[] { MEPSystemClassification.SupplyAir,MEPSystemClassification.ReturnAir,MEPSystemClassification.ExhaustAir,MEPSystemClassification.OtherAir }.Contains(classification))
-                throw new InvalidOperationException("Chọn phân loại hợp lệ cho hệ thống mới.");
+                throw new InvalidOperationException("Select a valid classification for the new system.");
             var existing=new FilteredElementCollector(doc).OfClass(typeof(MechanicalSystemType)).Cast<MechanicalSystemType>()
                 .FirstOrDefault(t=>string.Equals(t.Name,proposed.Name,StringComparison.OrdinalIgnoreCase));
             if (existing!=null)
             {
-                if (existing.SystemClassification!=classification) throw new InvalidOperationException("Tên hệ thống đã tồn tại nhưng khác phân loại: "+proposed.Name);
+                if (existing.SystemClassification!=classification) throw new InvalidOperationException("A system with this name exists with a different classification: "+proposed.Name);
                 return existing.Id;
             }
             // Executed inside the duct transaction: failed ducts do not leave orphan system types.
@@ -215,11 +215,11 @@ namespace IFCInfo
         private static void SetId(Duct d,BuiltInParameter name,ElementId value)
         {
             var p=d.get_Parameter(name); if (p?.AsElementId()==value) return;
-            if (p==null || p.IsReadOnly || !p.Set(value)) throw new InvalidOperationException("Không đặt được "+name);
+            if (p==null || p.IsReadOnly || !p.Set(value)) throw new InvalidOperationException("Could not set "+name);
         }
         private static void SetSize(Duct d,BuiltInParameter name,double value)
         {
-            var p=d.get_Parameter(name); if (p==null || p.IsReadOnly || !p.Set(value) || !DuctGeometryReader.Near(p.AsDouble(),value)) throw new InvalidOperationException("Không đặt được kích thước theo IFC.");
+            var p=d.get_Parameter(name); if (p==null || p.IsReadOnly || !p.Set(value) || !DuctGeometryReader.Near(p.AsDouble(),value)) throw new InvalidOperationException("Could not set dimensions from IFC.");
         }
         private sealed class RollbackErrors : IFailuresPreprocessor
         {

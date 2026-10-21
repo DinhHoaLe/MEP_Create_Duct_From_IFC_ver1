@@ -1,6 +1,6 @@
-﻿namespace IFCInfo
+namespace IFCInfo
 {
-    /// <summary>Một Level có thể chọn khi tạo Air Terminal.</summary>
+    /// <summary>A level option for air terminal placement.</summary>
     public sealed class ReplacementLevelOption
     {
         public long Id { get; set; }

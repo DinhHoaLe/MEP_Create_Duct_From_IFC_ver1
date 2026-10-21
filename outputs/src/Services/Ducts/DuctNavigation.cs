@@ -11,14 +11,14 @@ namespace IFCInfo
         internal static void Execute(UIDocument ui, RevitLinkInstance link, AirTerminalRow row, string action)
         {
             var source = link.GetLinkDocument()?.GetElement(ElementIds.Create(long.Parse(row.ElementId)));
-            if (source == null) throw new InvalidOperationException("Không tìm thấy nguồn IFC.");
+            if (source == null) throw new InvalidOperationException("IFC source not found.");
             var ids = row.CorrespondingDuctIds.Select(id => ElementIds.Create(id)).Where(id => ui.Document.GetElement(id) != null).ToList();
-            if (action == "Chọn duct tương ứng")
+            if (action == "Select corresponding duct")
             {
-                if (ids.Count == 0) throw new InvalidOperationException("Chưa tìm thấy duct tương ứng.");
+                if (ids.Count == 0) throw new InvalidOperationException("No corresponding duct was found.");
                 ui.Selection.SetElementIds(ids); ui.ShowElements(ids); return;
             }
-            if (action == "Cô lập trong 3D")
+            if (action == "Isolate in 3D")
             {
                 View3D view;
                 using (var t = new Transaction(ui.Document, "IFC - Inspection 3D"))
@@ -27,9 +27,9 @@ namespace IFCInfo
                     var family = new FilteredElementCollector(ui.Document).OfClass(typeof(ViewFamilyType)).Cast<ViewFamilyType>()
                         .First(v => v.ViewFamily == ViewFamily.ThreeDimensional);
                     view = View3D.CreateIsometric(ui.Document, family.Id);
-                    view.Name = "IFC kiểm tra " + DateTime.Now.ToString("yyyyMMdd HHmmss") + " " + view.Id.Number();
+                    view.Name = "IFC review " + DateTime.Now.ToString("yyyyMMdd HHmmss") + " " + view.Id.Number();
                     var bb = source.get_BoundingBox(null);
-                    if (bb == null) throw new InvalidOperationException("Nguồn không có bounding box.");
+                    if (bb == null) throw new InvalidOperationException("The source has no bounding box.");
                     var transform = link.GetTotalTransform().Multiply(bb.Transform);
                     var points = new List<XYZ>();
                     foreach (var x in new[] { bb.Min.X, bb.Max.X })
@@ -40,7 +40,7 @@ namespace IFCInfo
                         Max = new XYZ(points.Max(p=>p.X),points.Max(p=>p.Y),points.Max(p=>p.Z))+pad });
                     view.IsSectionBoxActive = true;
                     ids.Add(link.Id); view.IsolateElementsTemporary(ids);
-                    if (t.Commit() != TransactionStatus.Committed) throw new InvalidOperationException("Không tạo được view kiểm tra.");
+                    if (t.Commit() != TransactionStatus.Committed) throw new InvalidOperationException("Could not create the review view.");
                 }
                 ui.ActiveView = view;
             }

@@ -20,12 +20,12 @@ Assert ([IFCInfo.DuctSnapshotComparison]::Describe($stamp,$stamp.Replace('Supply
 $d=[IFCInfo.DuctCoverage+Segment]::new()
 $d.Id=1; $d.Start=@(0,0,0); $d.End=@(10,0,0); $d.Width=2; $d.Height=1; $d.SystemTypeId=7; $d.WidthAxis=@(0,0,1)
 $result=[IFCInfo.DuctCoverage]::CheckDetails(@(0,0,0),@(10,0,0),[IFCInfo.DuctCoverage+Segment[]]@($d),0.003,2,1,0,7,@(0,1,0))
-Assert ($result.Status -eq 'Sai góc tiết diện') 'Wrong section rotation'
+Assert ($result.Status -eq 'Profile rotation mismatch') 'Wrong section rotation'
 $d.WidthAxis=@(0,-1,0)
 $result=[IFCInfo.DuctCoverage]::CheckDetails(@(0,0,0),@(10,0,0),[IFCInfo.DuctCoverage+Segment[]]@($d),0.003,2,1,0,7,@(0,1,0))
-Assert ($result.Status -eq 'Khớp hoàn toàn') 'Reversed section axis is equivalent'
+Assert ($result.Status -eq 'Exact match') 'Reversed section axis is equivalent'
 $row=[IFCInfo.DuctRunRow]::new()
-$row.RunId='run'; $row.SourceId='123'; $row.IfcGuid='guid'; $row.TargetId='456'; $row.Status='Đã tạo'; $row.Reason="A, B `"quoted`"`nnext line"
+$row.RunId='run'; $row.SourceId='123'; $row.IfcGuid='guid'; $row.TargetId='456'; $row.Status='Created'; $row.Reason="A, B `"quoted`"`nnext line"
 $path=Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString()+'.csv')
 try {
     [IFCInfo.DuctRunRow]::Export($path,[IFCInfo.DuctRunRow[]]@($row))

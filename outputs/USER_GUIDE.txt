@@ -1,0 +1,56 @@
+CREATE DUCT FROM IFC - USER GUIDE
+Updated: 11 October 2026
+
+1. LOAD THE TOOL
+- Revit 2023/2024, .NET Framework 4.8, Windows x64.
+- For Add-in Manager 2023, load release/IFCInfo-Revit2023/IFCInfo_Revit2023.dll and run IFCInfo.IFCInfoCommand. No installer is required.
+- For Revit 2024, use release/IFCInfo-Revit2024/IFCInfo.dll. An optional installer is provided, but Add-in Manager can load it directly.
+- Close/reopen Revit if a previously loaded DLL is still in memory. Do not load a Revit 2024 DLL into Revit 2023.
+
+2. SELECT THE SOURCE
+- Open a project, select a loaded direct IFC link and a source category, then click Continue.
+- Bound/imported IFC and nested links are not handled as direct linked sources.
+- The original IFC is resolved from metadata, the link folder, the linked document path and the host-model folder. A cache named X.ifc.RVT resolves to X.ifc beside it.
+- If the source cannot be found, select the matching .ifc file. This path is remembered per link for the current session, including subsequent creation runs; it is not persisted across tool sessions.
+- Supports STEP IFC2X3/IFC4 within IFC_COMPATIBILITY.md. IFC4X1/IFC4X3 are unsupported.
+- Reload the same Revit link after changing the IFC on disk. Matching GUIDs alone do not prove that the link is current.
+
+3. CREATE DUCTS
+- Choose Ducts, inspect the comparison column/tooltips, check source rows and open Duct settings.
+- Straight native ducts can be read directly. DirectShape sources require a single straight solid matching IFC GUID/dimensions. Unsupported geometry is reported without guessing.
+- Select a duct type matching the profile; map system types, levels and worksets where applicable. Supported profiles include round, square, rectangular and supported flat oval extrusions. Ellipses are not automatically converted into Revit flat ovals.
+- The Include checkbox controls creation. Delete cannot remove source rows. Only included groups require type/system mappings; unchecked rows remain in the report.
+- Automatic level selection chooses a level below the lower endpoint. Manual level mapping preserves the IFC centerline. Creation uses the current workset unless mapped; updates preserve the existing workset unless mapped.
+- By default, execution failures roll back the entire run. Skip failures and keep successful results is optional. Preparation exclusions are reported separately.
+- Saved mappings are stored in Project Information; save the RVT to retain them across sessions.
+- Centerline, dimensions and profile rotation are verified. IFC System Name is stored in Comments/tracking data; Revit's generated system names are not forced to match it.
+
+4. CONNECT FITTINGS / AIR TERMINALS
+- Disabled by default. Uses Routing Preferences for elbows, transitions and tees, or direct connections between compatible ends.
+- Tees require three meeting ends; ducts are not split mid-run. Only successful ducts from the current run are considered.
+- Fitting gap: 1-1000 mm. Larger gaps may allow Revit to trim/extend endpoints for elbows/transitions. Straight bridging ducts are not added automatically.
+- Connected ducts must share system type and IFC System Name. Ambiguous nodes and missing routing/families are reported.
+- Optional host-model air terminal connections require ends within 1 mm and matching profile, direction and HVAC classification.
+- This does not reconstruct every IFC fitting or guarantee a closed MEP network. Connection failures follow the selected rollback/keep-successful policy.
+
+5. UPDATE IFC / REVIEW RESULTS / CONTINUE
+- Reload the same link, select Ducts and preview IFC updates. Review changes and select rows to update.
+- Tracking uses link UniqueId plus IFC GUID. Only ducts with snapshots, no manual edits, no pinning and no existing network connections are updated automatically.
+- Deleted sources, changed GUIDs, replaced link instances and old ducts without snapshots require manual review.
+- The report contains source ID, IFC GUID, target IDs, status and reason. Export CSV (UTF-8) to keep each run's detailed report. Updates retain the original creation-run group.
+- Click Back to tool after the report: the source/category selection is restored and comparisons are reread from the committed model. Previously created/full-coverage sources cannot be created again.
+- Check other rows to create more, or use Back to change the link/category. Close the main window to end the tool session.
+- Zoom can keep the tool open. Isolate creates a separate 3D review view with a source-area section box and isolates the link and matching ducts; nearby linked geometry inside that area may remain visible.
+
+6. NATIVE FAMILIES AND OTHER CURVES
+- Only target types in the source Revit category are allowed. Load a matching .rfa family where applicable.
+- Hosted families require a planar host face in the host model. The source point is projected onto that face; points outside the face cause a failure.
+- Point families use LocationPoint or the bounding-box center. Rotation uses the selected family orientation plus the user's angle; exact IFC fitting geometry is not recreated.
+- Adaptive families require control points; line-based families can request two points if the source path cannot be read.
+- Pipe, conduit and cable tray creation uses readable straight centerlines/profiles. A positive new length keeps the first endpoint fixed; zero preserves the source length. General placement does not automatically connect fittings.
+- Pset/Qto values are stored with placed elements and can be exported. They are not automatically converted into shared parameters.
+
+7. ACCEPTANCE
+- The tool modifies the host model: creation/updates, connections, saved mappings and review views.
+- Build, source/path/logic and offscreen WPF checks are recorded in CHANGELOG.md.
+- Live model transactions still require acceptance in a test RVT: transformed links, repeated creation, updates, hosts, routing, worksharing, rollback and Undo.

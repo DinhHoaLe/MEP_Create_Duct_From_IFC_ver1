@@ -1,0 +1,10 @@
+CREATE / UPDATE DUCTS FROM IFC
+
+See USER_GUIDE.txt, sections 2-5, for the current workflow.
+See IFC_COMPATIBILITY.md for supported IFC geometry and DUCT_COMPARISON.md for comparison statuses.
+Connections/fittings are optional and off by default. Creation/update modifies the model and follows the chosen rollback policy.
+After the report, use Back to tool to create another batch or Back to change the source.
+See CHANGELOG.md and ACCEPTANCE_CHECKLIST.md for validation and pending live Revit tests.
+FOLLOW PROJECT SYSTEM TYPES
+In Step 3, enable Follow project system types to use existing HVAC system types for all groups. Exact IFC names are matched without case sensitivity, with surrounding whitespace ignored. If no name matches, an existing explicit mapping is retained; otherwise select a project type for that group. Unmatched selected groups block submission. New type creation is disabled in this mode. Turning the option off restores the previous per-group selections and new-type settings. The option maps System Type; IFC System Name is still stored as source metadata in Comments.
+

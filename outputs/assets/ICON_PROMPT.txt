@@ -1,0 +1,8 @@
+Project asset: create-duct-from-ifc.png
+Mode: built-in imagegen, precise-object-edit; transparent PNG.
+Reference: Revit MEP Tools Icon Grid.png, middle-row right-column tile for MEP_Create_Duct_From_IFC_ver1.
+
+Prompt:
+Create one standalone application icon by extracting and refining only the middle-row right-column illustration for MEP_Create_Duct_From_IFC_ver1 from the supplied grid. Preserve its warm taupe/brown outlined isometric style, folded document with the colored interlocking IFC geometry symbol, and curved arrow pointing toward a rectangular metal duct. Remove all lettering including IFC and the project caption. No text, letters, numbers, watermark, card border or tile background. Center the icon on a square canvas with a transparent background and sharp edges suitable for a WPF application header. Do not include the other eight icons.
+
+The final PNG is embedded under the resource name IFCInfo.CreateDuctIcon.png.

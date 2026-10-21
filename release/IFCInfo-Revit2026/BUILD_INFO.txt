@@ -1,0 +1,7 @@
+Revit 2026 build
+API file version: 26.5.0.55
+Target framework: net10.0-windows
+Load IFCInfo_Revit2026.dll using a compatible Add-in Manager.
+Command: IFCInfo.IFCInfoCommand
+Build success does not certify live model transactions.
+Use this package only with a compatible Revit API/runtime; the 26.5 .NET 10 build is not for earlier .NET 8 Revit 2026 installations.

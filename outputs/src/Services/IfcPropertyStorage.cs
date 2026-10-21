@@ -7,7 +7,7 @@ namespace IFCInfo
     internal static class IfcPropertyStorage
     {
         private static readonly Guid Id=new Guid("7c8e9c76-6b96-4662-bb48-80b0d48c6ee2");
-        internal static string Text(AirTerminalRow row) => row.IfcProperties.Count==0 ? "Không có IFC Pset trong nguồn đã đọc." :
+        internal static string Text(AirTerminalRow row) => row.IfcProperties.Count==0 ? "No IFC Pset was found in the source data." :
             string.Join(Environment.NewLine,row.IfcProperties.Select(p=>p.ToString()));
         internal static void Save(Element target,AirTerminalRow row)
         {

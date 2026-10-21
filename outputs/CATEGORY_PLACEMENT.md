@@ -1,11 +1,11 @@
-# Category nguồn quyết định Category đích
+# Source category determines the target category
 
-Luồng đặt native chỉ hiển thị Family/Type có cùng Category ID với Category nguồn trong IFC link. Ví dụ Duct Fittings → Duct Fittings, Air Terminals → Air Terminals, Walls → Walls. Tên hiển thị có thể khác theo ngôn ngữ Revit; đối chiếu dùng ID.
+Native placement lists only family/types whose category ID matches the source element in the Revit IFC link. Examples: Duct Fittings to Duct Fittings, Air Terminals to Air Terminals, Walls to Walls. Display names can vary with the Revit language; comparison uses IDs.
 
-Category đích được cố định. Nếu chưa có type, nạp family `.rfa` đúng Category ngay trong hộp thoại. Family khác Category sẽ bị hoàn tác việc nạp. Duct, Pipe, Wall và các system family vẫn dùng type native tương ứng; không phải tất cả Category đều nạp được từ `.rfa`.
+The target category is fixed. If a type is missing, load a matching .rfa from the placement dialog. Loading a family in another category is rolled back. System families such as duct, pipe and wall use their corresponding native types; not every category can be loaded from an .rfa file.
 
-Trước khi đặt, tool kiểm tra Category của type đích và từng phần tử nguồn. Category chưa hỗ trợ hoặc chưa có type không được chuyển sang Category khác để tạo. Flex Ducts không dùng luồng tạo Duct thẳng.
+Before placement, the tool verifies the target type category and each source element category. Unsupported categories or categories without suitable types are not converted into another category. Flex Ducts do not use the straight-duct workflow.
 
-Quy tắc này dùng Category của phần tử trong Revit IFC link; không suy đoán Category từ tên phần tử hoặc tự phân loại lại IFC bị nhập thành Generic Models. Đây là ràng buộc Category, không tự chọn family chính xác theo hình dạng/kích thước nguồn.
+This rule uses the category assigned in the Revit IFC link. It does not infer categories from element names or reclassify IFC imported as Generic Models. Category matching does not automatically choose an exact family by shape or dimensions.
 
-Kiểm tra: build Release và script `outputs/tests/Render-DuctWindows.ps1`. Nạp family và tạo phần tử thực tế vẫn cần kiểm chứng trong Revit.
+Build and UI render checks verify the code/UI. Family loading and live placement still require Revit acceptance.

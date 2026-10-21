@@ -1,93 +1,56 @@
-# Sơ đồ class — IFCInfo, Revit 2024
+# Class map - IFCInfo, Revit 2023/2024
 
-Mở `IFCInfo.csproj`. Mã nguồn nằm trong `src/`; mỗi class cấp cao có một file cùng tên. Namespace `IFCInfo` và tên DLL giữ nguyên để add-in tiếp tục nạp được.
+Open IFCInfo.csproj. Source files are under src/; top-level classes normally have matching filenames. The IFCInfo namespace and command identity remain stable for Add-in Manager.
 
-## Thứ tự nên đọc
+## Main workflow
 
-1. `Commands/IFCInfoCommand.cs`: điểm bắt đầu khi chạy tool.
-2. `Services/IfcLinkCatalog.cs`: tìm IFC link cho dropdown.
-3. `Services/CategoryReader.cs`: đọc Category, System Type, System Name; ghép thông tin theo GUID.
-4. `UI/IFCInfoWindow.cs`: giao diện bước 1–2 và các sự kiện nút.
-5. `Services/Ducts/DuctWorkflow.cs`: chuẩn bị dữ liệu cho bước tạo Duct.
-6. `Services/Ducts/DuctExistenceChecker.cs`: cập nhật cột Duct đã tồn tại.
-7. `Services/Ducts/DuctGeometryReader.cs`: xác định đường tim và tiết diện nguồn.
-8. `Services/Ducts/DuctCreation.cs`: tạo Duct và quản lý transaction.
+1. Commands/IFCInfoCommand.cs opens the tool, executes accepted requests and resumes the refreshed source list after each run.
+2. Services/IfcLinkCatalog.cs finds IFC links; IfcSourcePathResolver.cs resolves the original IFC.
+3. Services/CategoryReader.cs reads categories, systems and properties and matches IFC data by GUID.
+4. UI/IFCInfoWindow.cs presents source selection, element review and request submission.
+5. Services/Ducts/DuctWorkflow.cs prepares selected ducts and update previews.
+6. DuctExistenceChecker.cs and DuctCoverage.cs compare host ducts and detect overlap.
+7. DuctGeometryReader.cs reads centerlines/profiles; DuctCreation.cs manages creation/update transactions.
+8. NativePlacement.cs and NativeBuildingPlacement.cs place supported native categories.
+9. DuctConnections.cs connects compatible duct ends using Routing Preferences.
 
-Các đường dẫn trên tính từ `src/`.
+## UI and supporting services
 
-## Tra cứu theo việc cần kiểm tra
+- UiDesign.cs: shared window chrome and embedded text-free project icon.
+- DuctCreationWindow.cs / DuctGroupEditor.cs: profile/system group mappings and options.
+- CurveCreationWindow.cs: native pipe/conduit/cable tray settings.
+- NativePlacementWindow.cs: matching-category family/type selection and loading.
+- DuctCreationResultWindow.cs: run report, export, selection and return to the tool.
+- IfcPropertiesPanel.cs / IfcObjectViewer.cs: property review and geometry preview.
+- IfcSelectionCsv.cs / IfcSelectionExport.cs: checked-source exports.
+- IfcPropertyStorage.cs: IFC property storage on placed elements.
+- DuctProjectSettings.cs / DuctRevision.cs / DuctSnapshotComparison.cs: saved mappings, tracking and revision checks.
+- Ifc/IfcSourceReader.cs: focused STEP IFC2X3/IFC4 reader.
 
-| Việc cần xem hoặc sửa | Class / file trong src |
+## Models
+
+| Model | Purpose |
 |---|---|
-| Khởi chạy, mở cửa sổ, thực thi yêu cầu | `Commands/IFCInfoCommand.cs` |
-| Danh sách link, nhận diện IFC, trạng thái load | `Services/IfcLinkCatalog.cs` |
-| Category, parameter, System Type / System Name | `Services/CategoryReader.cs` |
-| Giao diện chính, cột bảng, xuất clipboard | `UI/IFCInfoWindow.cs` |
-| Màu sắc, icon, dropdown, thanh bước | `UI/UiDesign.cs` |
-| Chọn type và ánh xạ hệ thống trước khi tạo ống | `UI/DuctCreationWindow.cs` |
-| Chọn family / Level để tạo miệng gió | `UI/AirTerminalReplacementWindow.cs` |
-| Đọc IFC2X3/IFC4, đơn vị, hệ thống, kích thước | `Ifc/IfcSourceReader.cs` |
-| Chuẩn bị và kiểm tra danh sách ống sẽ tạo | `Services/Ducts/DuctWorkflow.cs` |
-| Duct đã tồn tại ở vị trí nguồn hay chưa | `Services/Ducts/DuctExistenceChecker.cs` |
-| Thuật toán trùng toàn bộ / một phần đường tim, độc lập Revit | `Services/Ducts/DuctCoverage.cs` |
-| Đọc solid hoặc Duct native, xác định hình học | `Services/Ducts/DuctGeometryReader.cs` |
-| Duct.Create, đặt kích thước, góc, transaction, chống tạo lại | `Services/Ducts/DuctCreation.cs` |
-| Tạo miệng gió, chọn host, chống tạo lại | `Services/AirTerminals/AirTerminalReplacement.cs` |
+| LinkOption | IFC link ID, display name, source path and load state. |
+| CategoryOption | Source category selection. |
+| AirTerminalRow | Shared MEP source row; legacy name retained for compatibility. |
+| IfcTerminalSource | IFC source data keyed by GUID. |
+| DuctPlanItem | Planned centerline/profile in host coordinates. |
+| DuctChoice | Duct/system type or level/workset option. |
+| DuctRequest | Checked items and mappings for one create/update run. |
+| DuctRunRow | Per-operation report and target IDs. |
+| ReplacementTypeOption / ReplacementLevelOption | Native placement choices. |
+| ReplacementRequest | Confirmed native placement request. |
 
-## Các class dữ liệu — Models/
+## Invariants
 
-| Class | Nội dung |
-|---|---|
-| `LinkOption` | Lựa chọn IFC link: ID, tên, đường dẫn, trạng thái load. |
-| `CategoryOption` | Lựa chọn Category. |
-| `AirTerminalRow` | Dòng trong bảng MEP, hiện dùng chung cho cả Duct và Air Terminal; giữ tên cũ để tránh thay đổi liên kết hiện có. |
-| `IfcTerminalSource` | Dữ liệu IFC theo GUID; dùng cho cả miệng gió và ống. |
-| `DuctPlanItem` | Đường tim, tiết diện và nguồn của một Duct sẽ tạo. |
-| `DuctChoice` | Một Duct Type hoặc System Type có thể chọn. |
-| `DuctRequest` | Danh sách ống và ánh xạ type đã chọn để tạo. |
-| `ReplacementTypeOption` | Family type miệng gió và khả năng đặt host. |
-| `ReplacementLevelOption` | Level cho miệng gió. |
-| `ReplacementRequest` | Các lựa chọn đã xác nhận để tạo miệng gió. |
+- Creation geometry tolerance: 0.002 feet (approximately 0.6 mm).
+- Comparison tolerance: 1 mm; see DUCT_COMPARISON.md.
+- Configure CategoryReader before DuctWorkflow, which wraps its category-loading callback.
+- Keep manually resolved IFC paths on the session's LinkOption objects.
+- Rebuild rows after model changes; previous selections and creation requests are not reused.
+- DuctCreationWindow validates and saves only Include=true groups. DuctPlanItem emits PropertyChanged for Include.
+- Tracking GUIDs, Extensible Storage field names and model identities remain unchanged when localizing UI text.
+- Compile src/**/*.cs and embed assets/create-duct-from-ifc.png. Old prototypes are in the ignored cleanup archive.
 
-Các class phụ chỉ dùng nội bộ (ví dụ Profile, bộ xử lý lỗi transaction, entity STEP) vẫn nằm trong class sở hữu. `DuctCoverage.Segment` và `DuctCoverage.Result` giữ dạng lồng để bảo toàn API kiểm tra hiện có.
-
-## Luồng gọi chính
-
-```mermaid
-flowchart TD
-    Command[IFCInfoCommand] --> Links[IfcLinkCatalog]
-    Command --> UI[IFCInfoWindow]
-    UI --> Category[CategoryReader]
-    Category --> IFC[IfcSourceReader]
-    UI --> Workflow[DuctWorkflow]
-    Workflow --> Exists[DuctExistenceChecker]
-    Exists --> Coverage[DuctCoverage]
-    Exists --> Geometry[DuctGeometryReader]
-    Workflow --> Geometry
-    Workflow --> Settings[DuctCreationWindow]
-    Settings --> Request[DuctRequest]
-    Request --> Command
-    Command --> Create[DuctCreation]
-    Command --> Terminal[AirTerminalReplacement]
-```
-
-## Điểm cần lưu ý khi kiểm tra
-
-- Tạo Duct: dung sai hình học giữ nguyên `0.002 feet` (khoảng 0,6 mm).
-- Cột đối chiếu Duct: so đường tim và kích thước với sai số `1 mm`, kiểm tra System Type đích khi xác định được. Xem `DUCT_COMPARISON.md` về trạng thái và giới hạn.
-- `DuctWorkflow.Configure` phải chạy sau `CategoryReader.Configure`: workflow bổ sung bước kiểm tra tồn tại vào callback đọc Category.
-- CategoryReader giữ đường dẫn IFC đã chọn trên LinkOption của phiên; DuctCreationWindow chỉ kiểm tra và lưu ánh xạ cho các dòng Include=true.
-- Project chỉ compile `src/**/*.cs`. Bản mã cũ được chuyển sang thư mục backup trong `work/`, tránh có hai bản dễ nhầm.
-
-## Kết quả lịch sử trước bản sửa 16/09/2026
-
-- Build Release: 0 lỗi, 0 cảnh báo.
-- Giao diện: dropdown link/Category, chuyển bước, đổi link, link chưa load, cột trạng thái và dữ liệu xuất.
-- Hộp thoại tạo Duct: chặn tạo khi chưa ánh xạ System Type.
-- IFC mẫu: 1.084 Duct, 1.053 đoạn đọc được kích thước, 509 Air Terminal, 148 hệ thống.
-- Thuật toán đường tim: kiểm tra nhiều đoạn liên tiếp phủ đủ chiều dài.
-- 24 file class cấp cao có tên file trùng tên class.
-- Chưa kiểm thử transaction tạo phần tử trực tiếp trong Revit sau refactor.
-
-Kết quả kiểm tra bản hiện tại xem CHANGELOG.md. DuctPlanItem phát PropertyChanged cho Include để cập nhật số lượng chọn. UiPreview dùng ProjectReference tới IFCInfo.csproj; Test-DuctUi.ps1 kiểm tra tạo/cập nhật ngoài Revit.
-
+Historical samples contained 1,084 ducts (1,053 readable sizes), 509 terminals and 148 systems. These figures are sample-specific. Current verification is in CHANGELOG.md; live transaction acceptance remains pending.

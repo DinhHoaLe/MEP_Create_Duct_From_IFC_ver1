@@ -1,0 +1,17 @@
+PROJECT CLEANUP - 11 OCTOBER 2026
+
+230 redundant files (122.02 MiB) were moved into .cleanup-archive/2026-10-11.
+They have not been permanently deleted, so this did not free disk space.
+See the archive's manifest.json for exact paths, counts, sizes and states.
+To restore a file, move its archived copy to the corresponding project-relative path; compare before overwriting newer content.
+
+Archived: dated DLL/PDB releases, before-ifc4 DLL, ten prototype source backups, old build/.NET cache files, QA/preview images, obsolete UI scripts, unrelated standalone CadInspection tooling, and old bin/obj trees.
+Preserved: active source, all IFC/RVT models and model backups, test coverage, documentation, current release and installer source.
+The two useful IFC tests in work were migrated to outputs/tests/Test-IfcReaderEdgeCases.ps1 and Test-IfcSample.ps1, removing fixed external-drive/old-DLL dependencies.
+outputs/.vs could not be moved because access was denied/it was locked.
+
+Cleanup verification: 96 logic assertions, IFC edge cases and the Snowdon sample (509 terminals/148 systems) passed; 104 offscreen WPF checks passed at that checkpoint. Revit 2023 built without warnings; Revit 2024 built with two existing ElementId obsolete warnings. DLL metadata/category checks ran in x64 PowerShell.
+Revit 2023 is the default project/preview target; Revit 2024 builds require RevitVersion=2024. Revit API reflection tests require x64 PowerShell.
+Subsequent work added English UI, repeated creation, source-path tests and separately rebuilt 2023/2024 releases; see CHANGELOG.md for current validation.
+
+Permanent deletion was blocked by automatic approval review because the set included release DLLs and backups with data-loss risk. The files remain recoverable pending specific user authorization. Historical archive contents are intentionally preserved in their original language.

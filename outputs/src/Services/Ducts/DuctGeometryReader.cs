@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
@@ -9,10 +9,10 @@ using Autodesk.Revit.UI;
 
 namespace IFCInfo
 {
-    /// <summary>Đọc đường tim và tiết diện của Duct native hoặc solid IFC đã khớp kích thước.</summary>
+    /// <summary>Read centerlines and profiles from native ducts or IFC solids with matched dimensions.</summary>
     internal static class DuctGeometryReader
     {
-        internal const double Tolerance = 0.002; // feet, khoảng 0.6 mm
+        internal const double Tolerance = 0.002; // feet, approximately 0.6 mm
         public static DuctPlanItem Read(Element source, IfcTerminalSource expected)
         {
             var native = source as MEPCurve;
@@ -21,7 +21,7 @@ namespace IFCInfo
             {
                 var connector = native.ConnectorManager.Connectors.Cast<Connector>().First(c => c.ConnectorType == ConnectorType.End);
                 if (connector.Shape != ConnectorProfileType.Round && connector.Shape != ConnectorProfileType.Rectangular && connector.Shape != ConnectorProfileType.Oval)
-                    throw new NotSupportedException("Không xác định được tiết diện ống nguồn.");
+                    throw new NotSupportedException("Could not determine the source duct profile.");
                 return new DuctPlanItem
                 {
                     Start = line.GetEndPoint(0),
@@ -34,14 +34,14 @@ namespace IFCInfo
                 };
             }
             if (expected == null)
-                throw new NotSupportedException("Cần IFC gốc khớp GUID để xác định kích thước ống.");
+                throw new NotSupportedException("A matching GUID in the original IFC is required to determine duct dimensions.");
             if (!string.IsNullOrEmpty(expected.GeometryError))
                 throw new NotSupportedException(expected.GeometryError);
             if (expected.LengthMm <= 0)
-                throw new NotSupportedException("Thiếu chiều dài ống IFC.");
+                throw new NotSupportedException("IFC duct length is missing.");
             var solids = Solids(source.get_Geometry(new Options { DetailLevel = ViewDetailLevel.Fine })).ToList();
             if (solids.Count != 1)
-                throw new NotSupportedException("Cần một khối ống thẳng; hình học hiện có " + solids.Count + " khối.");
+                throw new NotSupportedException("A single straight duct solid is required; the geometry contains " + solids.Count + " solids.");
             Solid solid = solids[0];
             var ends = solid.Faces.Cast<Face>().OfType<PlanarFace>().Select(f => EndProfile(f)).Where(p => p != null).ToList();
             var matches = new List<DuctPlanItem>();
@@ -91,7 +91,7 @@ namespace IFCInfo
                 });
             }
             if (matches.Count != 1)
-                throw new NotSupportedException("Không xác định duy nhất đường tim khớp kích thước IFC (" + matches.Count + " kết quả). Hãy kiểm tra IFC và reload link.");
+                throw new NotSupportedException("Could not find a unique centerline matching IFC dimensions (" + matches.Count + " matches). Check the IFC and reload the link.");
             return matches[0];
         }
         internal static bool Near(double a, double b) => Math.Abs(a - b) <= Tolerance;

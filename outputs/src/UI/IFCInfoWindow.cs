@@ -14,6 +14,46 @@ namespace IFCInfo
     // Code-only WPF: all UI is contained in the DLL for Add-In Manager Manual.
     public sealed class IFCInfoWindow : Window
     {
+        public Action RunDuctCreation {get;set;}
+        private bool creationBusy;
+        private void SubmitDuctRequest(DuctRequest request)
+        {
+            if(creationBusy)return;
+            DuctCreationRequest=request;
+            if(RunDuctCreation==null){Close();return;}
+            creationBusy=true;
+            try {RunDuctCreation();}
+            catch(Exception ex){feedback.Text="Creation failed: "+ex.Message;}
+            finally {
+                DuctCreationRequest=null;creationBusy=false;
+                settingsTab.Content=null;settingsSelection=null;
+                embeddedSettings?.Close();embeddedSettings=null;
+                workflowTabs.SelectedItem=elementsTab;
+            }
+        }
+        private TabControl workflowTabs;
+        private TabItem sourceTab, elementsTab, settingsTab;
+        private string settingsSelection;
+        private DuctCreationWindow embeddedSettings;
+        private string SelectionKey() => string.Join("|",AirTerminals.Where(r=>r.IsSelected && r.CanSelect).Select(r=>r.ElementId).OrderBy(id=>id));
+        internal static Style SelectionHeaderStyle(Style basis)
+        {
+            var style=new Style(typeof(System.Windows.Controls.Primitives.DataGridColumnHeader),basis);
+            style.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty,HorizontalAlignment.Center));
+            style.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty,VerticalAlignment.Center));
+            style.Setters.Add(new Setter(Control.PaddingProperty,new Thickness(0,8,0,8)));
+            return style;
+        }
+        public void OpenDuctSettings(DuctCreationWindow editor, Action<DuctRequest> completed)
+        {
+            if(embeddedSettings!=null) embeddedSettings.Close();
+            embeddedSettings=editor;
+            settingsSelection=SelectionKey();
+            editor.BackEmbedded=()=>workflowTabs.SelectedItem=elementsTab; editor.CloseEmbedded=()=>Close();
+            editor.SubmitEmbedded=request=> {completed(request);SubmitDuctRequest(request);};
+            settingsTab.Content=editor.DetachBody();
+            workflowTabs.SelectedItem=settingsTab;
+        }
         private readonly TextBlock feedback;
         private readonly Button zoomSource;
         private AirTerminalRow focusedSource;
@@ -40,6 +80,8 @@ namespace IFCInfo
         public Action<AirTerminalRow,string> NavigateSource { get; set; }
         public Func<List<AirTerminalRow>, DuctRequest> PrepareUpdates { get; set; }
         public List<LinkOption> Links { get; set; } = new List<LinkOption>();
+        public long? InitialLinkId { get; set; }
+        public long? InitialCategoryId { get; set; }
         public LinkOption SelectedLink
         {
             get; private set;
@@ -82,7 +124,7 @@ namespace IFCInfo
         {
             get; set;
         }
-        public string IfcSourceStatus { get; set; } = "Chưa đọc IFC gốc.";
+        public string IfcSourceStatus { get; set; } = "The original IFC has not been read.";
         public List<AirTerminalRow> AirTerminals { get; set; } = new List<AirTerminalRow>();
         public List<ReplacementTypeOption> ReplacementTypes { get; set; } = new List<ReplacementTypeOption>();
         public Func<string,long,List<ReplacementTypeOption>> LoadPlacementFamily { get; set; }
@@ -111,7 +153,7 @@ namespace IFCInfo
 
         public IFCInfoWindow()
         {
-            Title = "Tạo phần tử Revit từ IFC";
+            Title = "Create Duct from IFC";
             Width = Math.Min(1500, SystemParameters.WorkArea.Width);
             Height = 800;
             MinWidth = 640;
@@ -131,9 +173,10 @@ namespace IFCInfo
             SourceInitialized += OnSourceInitialized;
             StateChanged += OnWindowStateChanged;
             Closed += OnWindowClosed;
+            Closed += (s,e)=>embeddedSettings?.Close();
             var root = new DockPanel { Background = Background };
             UiDesign.SetContent(this, root);
-            var header = new Grid { Margin = new Thickness(38, 34, 38, 28) };
+            var header = new Grid { Margin = new Thickness(28, 20, 28, 12) };
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(112) });
             header.ColumnDefinitions.Add(new ColumnDefinition());
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -141,9 +184,9 @@ namespace IFCInfo
             var titles = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(titles, 1);
             header.Children.Add(titles);
-            var heading = Text("Chọn link và Category", 30, "#37322B");
+            var heading = Text("Select link and category", 30, "#37322B");
             heading.FontWeight = FontWeights.Bold;
-            var subtitle = Text("Bước 1 · Chọn nguồn để tiếp tục", 17, "#716B63");
+            var subtitle = Text("Step 1 · Select a source to continue", 17, "#716B63");
             subtitle.Margin = new Thickness(0, 8, 0, 0);
             titles.Children.Add(heading);
             titles.Children.Add(subtitle);
@@ -162,7 +205,7 @@ namespace IFCInfo
             DockPanel.SetDock(footer, Dock.Bottom);
             root.Children.Add(footer);
             var status = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 8, 16, 8) };
-            feedback = Text("Chọn IFC link và Category để tiếp tục.", 14, "#716B63");
+            feedback = Text("Select an IFC link and category to continue.", 14, "#716B63");
             feedback.MaxWidth = 310;
             status.Children.Add(feedback);
             Grid.SetColumn(status, 1);
@@ -180,20 +223,20 @@ namespace IFCInfo
                 Grid.SetRow(leftButtons, compact ? 1 : 0); Grid.SetColumn(leftButtons, 0);
                 Grid.SetRow(buttons, compact ? 1 : 0); Grid.SetColumn(buttons, 2);
             };
-            var back = Button("← Quay lại", false);
+            var back = Button("← Back", false);
             back.Visibility = Visibility.Collapsed;
             leftButtons.Children.Add(back);
-            zoomSource=IconButton("Zoom tới nguồn IFC",
+            zoomSource=IconButton("Zoom to IFC source",
                 "M10,3 A7,7 0 1 0 10,17 A7,7 0 1 0 10,3 M15,15 L21,21 M10,7 L10,13 M7,10 L13,10");
             zoomSource.Visibility=Visibility.Collapsed; zoomSource.IsEnabled=false;
             zoomSource.Click+=(s,e)=>ZoomToIfcSource(focusedSource);
-            var next = Button("Tiếp tục →", true);
+            var next = Button("Continue →", true);
             next.IsEnabled = false;
             buttons.Children.Add(next);
-            var create = Button("Tạo family →", true);
+            var create = Button("Create family →", true);
             create.Visibility = Visibility.Collapsed;
             buttons.Children.Add(create);
-            var body = new StackPanel { Margin = new Thickness(38, 6, 38, 20) };
+            var body = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
             var card = new StackPanel { Margin = new Thickness(34, 25, 34, 32) };
             body.Children.Add(new Border
             {
@@ -204,27 +247,62 @@ namespace IFCInfo
                 BorderThickness = new Thickness(1),
                 Effect = UiDesign.Shadow()
             });
-            var sourceTitle = Text("Thông tin nguồn", 22, "#37322B");
+            var sourceTitle = Text("Source information", 22, "#37322B");
             sourceTitle.FontWeight = FontWeights.SemiBold;
             card.Children.Add(sourceTitle);
-            var description = Text("Chọn IFC link và Category nguồn, sau đó chọn Category / Type đích trong Revit.", 15, "#716B63");
+            var description = Text("Select an IFC link and source category, then choose the target category / type in Revit.", 15, "#716B63");
             description.Margin = new Thickness(0, 8, 0, 0);
             card.Children.Add(description);
-            var linkBox = UiDesign.Field(card, "IFC link", "Chọn link nguồn từ mô hình IFC", "Chọn IFC link...", false);
-            var categoryBox = UiDesign.Field(card, "Category nguồn", "Các category có phần tử trong IFC link", "Chọn Category...", true);
+            var linkBox = UiDesign.Field(card, "IFC link", "Select the source IFC model link", "Select IFC link...", false);
+            var categoryBox = UiDesign.Field(card, "Source category", "Categories containing elements in the IFC link", "Select category...", true);
             categoryBox.IsEnabled = false;
             var scroll = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-            root.Children.Add(scroll);
+            workflowTabs=new TabControl {Name="WorkflowTabs",Background=Background,BorderThickness=new Thickness(0),Margin=new Thickness(20,4,20,0)};
+            sourceTab=new TabItem {Header="Source",Content=scroll,Padding=new Thickness(20,10,20,10)};
+            elementsTab=new TabItem {Header="Elements",IsEnabled=false,Padding=new Thickness(20,10,20,10)};
+            settingsTab=new TabItem {Header="Duct Settings",IsEnabled=false,Padding=new Thickness(20,10,20,10)};
+            UiDesign.StyleWorkflowTabs(workflowTabs);
+            workflowTabs.Items.Add(sourceTab);workflowTabs.Items.Add(elementsTab);workflowTabs.Items.Add(settingsTab);
+            root.Children.Add(workflowTabs);
+            workflowTabs.SelectionChanged+=(s,e)=>
+            {
+                if(e.Source!=workflowTabs)return;
+                bool source=workflowTabs.SelectedItem==sourceTab;
+                bool settings=workflowTabs.SelectedItem==settingsTab;
+                footer.Visibility=settings?Visibility.Collapsed:Visibility.Visible;
+                next.Visibility=source?Visibility.Visible:Visibility.Collapsed;
+                back.Visibility=source||settings?Visibility.Collapsed:Visibility.Visible;
+                create.Visibility=!source&&!settings&&(CanCreateDucts||CanReplaceCategory)?Visibility.Visible:Visibility.Collapsed;
+                heading.Text=source?"Select link and category":settings?"Duct settings":SelectedCategory?.Name??"Elements";
+                subtitle.Text=source?"Select an IFC source":settings?"Configure selected ducts":"Review IFC elements";
+                progress.Content=UiDesign.Steps(source?1:settings?3:2);
+                if(settings && (settingsTab.Content==null || settingsSelection!=SelectionKey()))
+                {
+                    settingsTab.Content=null;
+                    create.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                    if(settingsTab.Content==null)workflowTabs.SelectedItem=elementsTab;
+                }
+            };
             Loaded += (s, e) =>
             {
                 linkBox.ItemsSource = Links;
-                feedback.Text = Links.Count == 0 ? "Không tìm thấy IFC link trong model. Hãy link IFC rồi mở lại tool." : "Chọn IFC link và Category.";
+                feedback.Text = Links.Count == 0 ? "No IFC link was found. Link an IFC model, then reopen the tool." : "Select an IFC link and category.";
+                if (InitialLinkId.HasValue)
+                {
+                    linkBox.SelectedItem = Links.FirstOrDefault(link => link.Id == InitialLinkId.Value);
+                    if (InitialCategoryId.HasValue)
+                        categoryBox.SelectedItem = Categories.FirstOrDefault(category => category.Id == InitialCategoryId.Value);
+                    if (next.IsEnabled)
+                        next.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                }
             };
             linkBox.SelectionChanged += (s, e) =>
             {
                 next.IsEnabled = false;
                 categoryBox.ItemsSource = null;
                 categoryBox.IsEnabled = false;
+                elementsTab.Content=null; elementsTab.IsEnabled=false;
+                settingsTab.Content=null; settingsTab.IsEnabled=false;
                 SelectedLink = linkBox.SelectedItem as LinkOption;
                 SelectedCategory = null;
                 Replacement = null;
@@ -240,7 +318,7 @@ namespace IFCInfo
                     return;
                 if (!SelectedLink.IsLoaded)
                 {
-                    feedback.Text = "Link chưa được load. Hãy load link trong Revit rồi mở lại tool.";
+                    feedback.Text = "The link is unloaded. Load it in Revit, then reopen the tool.";
                     return;
                 }
                 try
@@ -248,11 +326,14 @@ namespace IFCInfo
                     LoadLink?.Invoke(SelectedLink);
                     categoryBox.ItemsSource = Categories;
                     categoryBox.IsEnabled = Categories.Count > 0;
-                    feedback.Text = Categories.Count == 0 ? "Link không có Category chứa phần tử." : "Chọn Category rồi bấm Tiếp tục.";
+                    feedback.Text = Categories.Count == 0 ? "The link has no categories containing supported elements." : "Select a category, then click Continue.";
                 }
-                catch (Exception ex) { feedback.Text = "Không đọc được link: " + ex.Message; }
+                catch (Exception ex) { feedback.Text = "Could not read link: " + ex.Message; }
             };
-            categoryBox.SelectionChanged += (s, e) => next.IsEnabled = categoryBox.SelectedItem is CategoryOption;
+            categoryBox.SelectionChanged += (s, e) => {
+                next.IsEnabled = categoryBox.SelectedItem is CategoryOption;
+                elementsTab.Content=null;elementsTab.IsEnabled=false;settingsTab.Content=null;settingsTab.IsEnabled=false;
+            };
             next.Click += (s, e) =>
             {
                 SelectedCategory = categoryBox.SelectedItem as CategoryOption;
@@ -260,42 +341,44 @@ namespace IFCInfo
                     return;
                 try
                 {
-                    using (LoadingWindow.ShowWhile(this, "Đang đọc dữ liệu IFC", "Đọc thuộc tính, hình dạng và đối chiếu phần tử trong Revit…"))
+                    using (LoadingWindow.ShowWhile(this, "Reading IFC data", "Reading properties and geometry, and comparing Revit elements…"))
                         LoadCategory(SelectedCategory);
                 }
-                catch (Exception ex) { feedback.Text = "Không đọc được Category: " + ex.Message; return; }
+                catch (Exception ex) { feedback.Text = "Could not read category: " + ex.Message; return; }
                 heading.Text = SelectedCategory.Name;
                 progress.Content = UiDesign.Steps(2);
-                subtitle.Text = "Bước 2 · Chọn phần tử";
+                subtitle.Text = "Step 2 · Select elements";
                 header.Margin = new Thickness(38, 24, 38, 4);
-                scroll.Content = CountPage();
+                elementsTab.Content=new ScrollViewer {Content=CountPage(),VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
+                elementsTab.IsEnabled=true;settingsTab.Content=null;settingsTab.IsEnabled=CanCreateDucts;
+                workflowTabs.SelectedItem=elementsTab;
                 scroll.ScrollToTop();
                 next.Visibility = Visibility.Collapsed;
                 back.Visibility = Visibility.Visible;
                 zoomSource.Visibility=Visibility.Visible;
-                create.Content = CanCreateDucts ? "Thiết lập Duct →" : "Tạo family →";
+                create.Content = CanCreateDucts ? "Duct settings →" : "Create family →";
                 create.Visibility = CanCreateDucts || CanReplaceCategory ? Visibility.Visible : Visibility.Collapsed;
                 feedback.Text = "";
             };
             back.Click += (s, e) =>
             {
-                header.Margin = new Thickness(38, 34, 38, 28);
-                heading.Text = "Chọn link và Category";
-                subtitle.Text = "Bước 1 · Chọn nguồn để tiếp tục";
+                header.Margin = new Thickness(28, 20, 28, 12);
+                heading.Text = "Select link and category";
+                subtitle.Text = "Step 1 · Select a source to continue";
                 progress.Content = UiDesign.Steps(1);
-                scroll.Content = body;
+                workflowTabs.SelectedItem=sourceTab;
                 scroll.ScrollToTop();
                 next.Visibility = Visibility.Visible;
                 back.Visibility = create.Visibility = Visibility.Collapsed;
                 zoomSource.Visibility=Visibility.Collapsed; zoomSource.IsEnabled=false; focusedSource=null;
-                feedback.Text = "Chọn IFC link và Category.";
+                feedback.Text = "Select an IFC link and category.";
             };
             Action openPlacement = () =>
             {
                 var selected = AirTerminals.Where(row => row.IsSelected && row.CanSelect).ToList();
                 if (selected.Count == 0)
                 {
-                    feedback.Text = "Hãy tích chọn ít nhất một phần tử nguồn.";
+                    feedback.Text = "Check at least one source element.";
                     return;
                 }
                 if (SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves || SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_CableTray || SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_Conduit)
@@ -319,25 +402,25 @@ namespace IFCInfo
                 var selected = AirTerminals.Where(row => row.IsSelected && row.CanSelect).ToList();
                 if (selected.Count == 0)
                 {
-                    feedback.Text = "Hãy tích chọn ít nhất một ống.";
+                    feedback.Text = "Check at least one duct.";
                     return;
                 }
                 try
                 {
+                    if(settingsTab.Content!=null && settingsSelection==SelectionKey()) {workflowTabs.SelectedItem=settingsTab;return;}
                     var request = PrepareDucts?.Invoke(selected);
                     if (request != null)
                     {
-                        DuctCreationRequest = request;
-                        Close();
+                        SubmitDuctRequest(request);
                     }
                 }
-                catch (Exception ex) { feedback.Text = "Không chuẩn bị được Duct: " + ex.Message; }
+                catch (Exception ex) { feedback.Text = "Could not prepare ducts: " + ex.Message; }
             };
         }
 
         private FrameworkElement CountPage()
         {
-            var panel = new StackPanel { Margin = new Thickness(28, 0, 28, 20) };
+            var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
             var sourceView = new System.Windows.Data.ListCollectionView(AirTerminals);
             var table = new DataGrid
             {
@@ -378,9 +461,17 @@ namespace IFCInfo
                 Mode = System.Windows.Data.BindingMode.TwoWay,
                 UpdateSourceTrigger = System.Windows.Data.UpdateSourceTrigger.PropertyChanged
             });
+            var selectHeader=new CheckBox {Name="SelectAllSources",ToolTip="Select / clear all visible eligible elements",HorizontalAlignment=HorizontalAlignment.Center};
+            selectHeader.Click+=(s,e)=> {var eligible=sourceView.Cast<AirTerminalRow>().Where(r=>r.CanSelect).ToList(); bool select=!eligible.All(r=>r.IsSelected); foreach(var row in eligible)row.IsSelected=select;};
+            Action refreshSelectHeader=()=> {
+                var eligible=sourceView.Cast<AirTerminalRow>().Where(r=>r.CanSelect).ToList();
+                int count=eligible.Count(r=>r.IsSelected);
+                selectHeader.IsEnabled=eligible.Count>0;
+                selectHeader.IsChecked=count==0?false:count==eligible.Count?(bool?)true:null;
+            };
             table.Columns.Add(new DataGridTemplateColumn
             {
-                Header = "Chọn",
+                Header = selectHeader, HeaderStyle = SelectionHeaderStyle(table.ColumnHeaderStyle),
                 Width = 60,
                 CellTemplate = new DataTemplate { VisualTree = check }
             });
@@ -390,21 +481,21 @@ namespace IFCInfo
                 statusStyle.Setters.Add(new Setter(TextBlock.FontWeightProperty, FontWeights.SemiBold));
                 statusStyle.Setters.Add(new Setter(TextBlock.ForegroundProperty, Brush("#9A6A16")));
                 statusStyle.Setters.Add(new Setter(TextBlock.ToolTipProperty, new System.Windows.Data.Binding("DuctExistenceDetail")));
-                var exists = new DataTrigger { Binding = new System.Windows.Data.Binding("DuctExistence"), Value = "Khớp hoàn toàn" };
+                var exists = new DataTrigger { Binding = new System.Windows.Data.Binding("DuctExistence"), Value = "Exact match" };
                 exists.Setters.Add(new Setter(TextBlock.ForegroundProperty, Brush("#16815D")));
                 statusStyle.Triggers.Add(exists);
-                foreach (string mismatch in new[] { "Sai kích thước", "Sai hệ thống", "Sai kích thước và hệ thống" })
+                foreach (string mismatch in new[] { "Size mismatch", "System mismatch", "Size and system mismatch" })
                 {
                     var error = new DataTrigger { Binding = new System.Windows.Data.Binding("DuctExistence"), Value = mismatch };
                     error.Setters.Add(new Setter(TextBlock.ForegroundProperty, Brush("#B54747")));
                     statusStyle.Triggers.Add(error);
                 }
-                var missing = new DataTrigger { Binding = new System.Windows.Data.Binding("DuctExistence"), Value = "Chưa tồn tại" };
+                var missing = new DataTrigger { Binding = new System.Windows.Data.Binding("DuctExistence"), Value = "Not created" };
                 missing.Setters.Add(new Setter(TextBlock.ForegroundProperty, Brush("#716B63")));
                 statusStyle.Triggers.Add(missing);
                 table.Columns.Add(new DataGridTextColumn
                 {
-                    Header = "Đối chiếu Duct",
+                    Header = "Duct comparison",
                     Width = new DataGridLength(150,DataGridLengthUnitType.Star),
                     IsReadOnly = true,
                     Binding = new System.Windows.Data.Binding("DuctExistence"),
@@ -413,7 +504,7 @@ namespace IFCInfo
             }
             foreach (var column in new[] {
                 new { Header = "Element ID", Property = "ElementId", Width = 95.0 },
-                new { Header = "Phần tử", Property = "Name", Width = 220.0 },
+                new { Header = "Element", Property = "Name", Width = 220.0 },
                 new { Header = "System Type", Property = "SystemType", Width = 150.0 },
                 new { Header = "System Name", Property = "SystemName", Width = 150.0 },
                 new { Header = "Shape", Property = "Shape", Width = 100.0 } })
@@ -444,7 +535,7 @@ namespace IFCInfo
                         return;
                     }
                     try { previewViewer.ShowModel(focusedSource==null ? null : LoadPreview?.Invoke(focusedSource)); }
-                    catch (Exception ex) { previewViewer.Clear("Không đọc được hình học preview: "+ex.Message); feedback.Text="Không đọc được hình học preview: "+ex.Message; }
+                    catch (Exception ex) { previewViewer.Clear("Could not read preview geometry: "+ex.Message); feedback.Text="Could not read preview geometry: "+ex.Message; }
                 }
             };
             table.CurrentCellChanged+=(s,e)=>updateFocusedSource();
@@ -468,28 +559,28 @@ namespace IFCInfo
             previewViewer=new IfcObjectViewer { MinHeight=380,Margin=new Thickness(12,0,0,0),VerticalAlignment=VerticalAlignment.Stretch };
             previewViewer.AddHeaderAction(zoomSource);
             var propertyToolbar=new DockPanel { Margin=new Thickness(12,0,0,8),LastChildFill=true };
-            var copyProperties=IconButton("Sao chép thuộc tính",
+            var copyProperties=IconButton("Copy properties",
                 "M8,8 L20,8 20,20 8,20 Z M4,4 L16,4 16,8 M4,4 L4,16 8,16");
             copyProperties.Click+=(s,e)=>
             {
                 try { Clipboard.SetText(properties.AllPropertyValues()); }
-                catch (System.Runtime.InteropServices.ExternalException) { feedback.Text="Clipboard đang bận. Hãy thử sao chép lại."; }
+                catch (System.Runtime.InteropServices.ExternalException) { feedback.Text="The clipboard is busy. Try copying again."; }
             };
             DockPanel.SetDock(copyProperties,Dock.Right); propertyToolbar.Children.Add(copyProperties);
-            var export=IconButton("Xuất dữ liệu (CSV, TSV, JSON, XML)",
+            var export=IconButton("Export data (CSV, TSV, JSON, XML)",
                 "M12,3 L12,15 M7,10 L12,15 17,10 M5,18 L5,21 19,21 19,18");
             export.Click+=(s,e)=>
             {
                 var selected=AirTerminals.Where(r=>r.IsSelected).ToList();
-                if(selected.Count==0) { feedback.Text="Tích chọn ít nhất một đối tượng IFC để export."; return; }
+                if(selected.Count==0) { feedback.Text="Check at least one IFC object to export."; return; }
                 var file=new Microsoft.Win32.SaveFileDialog {
                     Filter="CSV (*.csv)|*.csv|TSV (*.tsv)|*.tsv|JSON (*.json)|*.json|XML (*.xml)|*.xml",
                     FileName="IFC-selected",DefaultExt=".csv",AddExtension=true };
                 if(file.ShowDialog(this)!=true) return;
                 try {
                     IfcSelectionExport.Export(file.FileName,selected,SelectedLink?.Name,SelectedCategory?.Name,file.FilterIndex);
-                    feedback.Text="Đã export "+selected.Count+" đối tượng IFC.";
-                } catch(Exception ex) {feedback.Text="Không export được: "+ex.Message;}
+                    feedback.Text="Exported "+selected.Count+" IFC objects.";
+                } catch(Exception ex) {feedback.Text="Could not export: "+ex.Message;}
             };
             DockPanel.SetDock(export,Dock.Right); propertyToolbar.Children.Add(export);
             properties.SelectionTotal.Margin=new Thickness(0);
@@ -503,6 +594,7 @@ namespace IFCInfo
             var propertyRows=AirTerminals.ToList();
             Action refreshProperties=()=>
             {
+                refreshSelectHeader();
                 var checkedRows=propertyRows.Where(r=>r.IsSelected).ToList();
                 properties.SetSelectionCount(checkedRows.Count, AirTerminalCount ?? propertyRows.Count);
                 properties.ShowSources(checkedRows.Count>0 ? checkedRows : table.SelectedItems.Cast<AirTerminalRow>().ToList());
@@ -561,13 +653,13 @@ namespace IFCInfo
             panel.Children.Add(details);
             var summary = new DockPanel { Margin=new Thickness(0,0,0,8),LastChildFill=true };
             var selectionButtons=new StackPanel { Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right };
-            var selectAll=IconButton("Chọn tất cả",
+            var selectAll=IconButton("Select all",
                 "M3,3 L21,3 21,21 3,21 Z M7,12 L10,15 17,8");
-            var selectNone=IconButton("Bỏ chọn tất cả",
+            var selectNone=IconButton("Clear selection",
                 "M3,3 L21,3 21,21 3,21 Z M7,12 L17,12");
-            var filter=IconButton("Lọc phần tử",
+            var filter=IconButton("Filter elements",
                 "M3,4 L21,4 14,12 14,19 10,21 10,12 Z");
-            var sort=IconButton("Sắp xếp phần tử",
+            var sort=IconButton("Sort elements",
                 "M4,6 L14,6 M4,12 L11,12 M4,18 L8,18 M18,5 L18,19 M14,15 L18,19 22,15");
             filter.Name="FilterSources"; sort.Name="SortSources";
             foreach(var button in new[] { filter,sort,selectAll,selectNone })
@@ -584,12 +676,12 @@ namespace IFCInfo
                 Name="IfcElementSearch", Height=40, FontSize=14,
                 VerticalContentAlignment=VerticalAlignment.Center,
                 Padding=new Thickness(10,0,10,0), Margin=new Thickness(0,3,8,3),
-                ToolTip="Tìm theo Element ID hoặc tên phần tử",
+                ToolTip="Search by element ID or name",
                 BorderBrush=Brush("#DDD6CE"), Background=Brush("#FFFFFF")
             };
             var searchLayout=new Grid();
             searchLayout.Children.Add(search);
-            var placeholder=Text("Tìm kiếm phần tử IFC…",14,"#716B63");
+            var placeholder=Text("Search IFC elements…",14,"#716B63");
             placeholder.Margin=new Thickness(12,0,0,0);
             placeholder.VerticalAlignment=VerticalAlignment.Center;
             placeholder.IsHitTestVisible=false;
@@ -619,7 +711,7 @@ namespace IFCInfo
             filter.Click+=(s,e)=>
             {
                 var menu=new ContextMenu();
-                foreach(var option in new[] { new { Label="Tất cả",Mode="all" },new { Label="Đang tích chọn",Mode="selected" },new { Label="Chưa tích chọn",Mode="unselected" } })
+                foreach(var option in new[] { new { Label="All",Mode="all" },new { Label="Checked",Mode="selected" },new { Label="Unchecked",Mode="unselected" } })
                 {
                     var item=new MenuItem { Header=option.Label,IsCheckable=true,IsChecked=filterMode==option.Mode && filterExistence==null };
                     item.Click+=(a,b)=> { filterMode=option.Mode;filterExistence=null;SetIconButtonActive(filter,option.Mode!="all");applyFilter(); };
@@ -627,7 +719,7 @@ namespace IFCInfo
                 }
                 if (CanCreateDucts)
                 {
-                    var existence=new MenuItem { Header="Đối chiếu Duct" };
+                    var existence=new MenuItem { Header="Duct comparison" };
                     foreach(string value in propertyRows.Select(r=>r.DuctExistence).Where(v=>!string.IsNullOrEmpty(v)).Distinct().OrderBy(v=>v))
                     {
                         var item=new MenuItem { Header=value,IsCheckable=true,IsChecked=filterExistence==value };
@@ -642,10 +734,10 @@ namespace IFCInfo
             {
                 var menu=new ContextMenu();
                 var fields=new List<KeyValuePair<string,string>> {
-                    new KeyValuePair<string,string>("Chọn","IsSelected"),
+                    new KeyValuePair<string,string>("Select","IsSelected"),
                     new KeyValuePair<string,string>("Element ID","NumericElementId"),
-                    new KeyValuePair<string,string>("Phần tử","Name") };
-                if (CanCreateDucts) fields.Insert(1,new KeyValuePair<string,string>("Đối chiếu Duct","DuctExistence"));
+                    new KeyValuePair<string,string>("Element","Name") };
+                if (CanCreateDucts) fields.Insert(1,new KeyValuePair<string,string>("Duct comparison","DuctExistence"));
                 foreach(var field in fields)
                 foreach(var direction in new[] { ListSortDirection.Ascending,ListSortDirection.Descending })
                 {
@@ -660,7 +752,7 @@ namespace IFCInfo
             details.Children.Add(summary);
             if (!AirTerminalCount.HasValue)
             {
-                var error = Text(AirTerminalError ?? "Không đọc được số lượng. Hãy chạy lại tool.", 13, "#9A5B12");
+                var error = Text(AirTerminalError ?? "Could not read the count. Run the tool again.", 13, "#9A5B12");
                 error.Margin = new Thickness(0, 16, 0, 0);
                 panel.Children.Add(error);
             }
@@ -669,7 +761,7 @@ namespace IFCInfo
 
         public string SystemTableText()
         {
-            var result = new StringBuilder((CanCreateDucts ? "Duct đã tồn tại\t" : "") + "Element ID\tPhần tử\tSystem Type\tSystem Name\tCao độ (mm)");
+            var result = new StringBuilder((CanCreateDucts ? "Duct comparison\t" : "") + "Element ID\tElement\tSystem Type\tSystem Name\tElevation (mm)");
             foreach (var row in AirTerminals)
             {
                 result.AppendLine();
@@ -759,23 +851,23 @@ namespace IFCInfo
         private void ZoomToIfcSource(AirTerminalRow row)
         {
             if (row==null) return;
-            const string action="Zoom tới nguồn IFC";
+            const string action="Zoom to IFC source";
             if (NavigateSource!=null)
             {
                 try
                 {
                     NavigateSource(row,action);
-                    feedback.Text="Đã zoom tới nguồn IFC · tool vẫn đang mở.";
+                    feedback.Text="Zoomed to the IFC source · tool remains open.";
                     feedback.Foreground=Brush("#16744B");
                 }
                 catch (Exception ex)
                 {
-                    feedback.Text="Không zoom được tới nguồn IFC: "+ex.Message;
+                    feedback.Text="Could not zoom to the IFC source: "+ex.Message;
                     feedback.Foreground=Brush("#B54747");
                 }
                 return;
             }
-            // Fallback cho host không cung cấp callback điều hướng.
+            // Fallback for hosts without a navigation callback.
             NavigationRow=row; NavigationAction=action; Close();
         }
 
@@ -824,12 +916,12 @@ namespace IFCInfo
             try
             {
                 Clipboard.SetText(value);
-                feedback.Text = "Đã sao chép vào clipboard.";
+                feedback.Text = "Copied to clipboard.";
                 feedback.Foreground = Brush("#16744B");
             }
             catch (System.Runtime.InteropServices.COMException)
             {
-                feedback.Text = "Clipboard đang bận. Vui lòng thử lại.";
+                feedback.Text = "The clipboard is busy. Please try again.";
                 feedback.Foreground = Brush("#9A5B12");
             }
         }

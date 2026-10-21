@@ -10,7 +10,7 @@ using Autodesk.Revit.UI;
 
 namespace IFCInfo
 {
-    /// <summary>Tìm IFC link, trạng thái load và đường dẫn nguồn cho dropdown.</summary>
+    /// <summary>Find IFC links, load states and source paths for the dropdown.</summary>
     internal static class IfcLinkCatalog
     {
         public static List<LinkOption> GetLinks(Document doc)
@@ -29,16 +29,15 @@ namespace IFCInfo
                 bool ifcName = type.Name.EndsWith(".ifc.rvt", StringComparison.OrdinalIgnoreCase) || type.Name.EndsWith(".ifc", StringComparison.OrdinalIgnoreCase);
                 if (string.IsNullOrWhiteSpace(original) && !ifcPath && !ifcName)
                     continue;
-                string sourcePath = string.IsNullOrWhiteSpace(original) ? path : original.Trim();
-                if (sourcePath.EndsWith(".ifc.rvt", StringComparison.OrdinalIgnoreCase))
-                    sourcePath = sourcePath.Substring(0, sourcePath.Length - 4);
+                string sourcePath = IfcSourcePathResolver.Resolve(original, path,
+                    linkedDoc?.PathName, doc.PathName, type.Name);
                 result.Add(new LinkOption { Id = link.Id.Number(), Name = type.Name, IfcPath = sourcePath, IsLoaded = linkedDoc != null });
             }
             foreach (var group in result.GroupBy(l => l.Name).Where(g => g.Count() > 1))
             {
                 int number = 0;
                 foreach (var item in group.OrderBy(l => l.Id))
-                    item.Name += " · Bản " + (++number);
+                    item.Name += " · Instance " + (++number);
             }
             return result.OrderBy(l => l.Name).ToList();
         }

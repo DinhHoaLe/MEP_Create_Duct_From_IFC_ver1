@@ -22,7 +22,7 @@ namespace IFCInfo
             BorderBrush = IFCInfoWindow.Brush("#DDD6CE");
             BorderThickness = new Thickness(1); CornerRadius = new CornerRadius(10); Padding = new Thickness(12);
             var layout = new DockPanel(); Child = layout;
-            var heading = IFCInfoWindow.Text("Properties · Nguồn IFC", 18, "#37322B");
+            var heading = IFCInfoWindow.Text("Properties · IFC source", 18, "#37322B");
             DockPanel.SetDock(heading, Dock.Top); layout.Children.Add(heading);
             heading.Margin = new Thickness(0,0,0,8);
             selectionCount = IFCInfoWindow.Text("Total: 0 / 0",12,"#716B63");
@@ -35,8 +35,8 @@ namespace IFCInfo
             var style = new Style(typeof(TextBlock));
             style.Setters.Add(new Setter(TextBlock.TextWrappingProperty, TextWrapping.Wrap));
             style.Setters.Add(new Setter(TextBlock.MarginProperty, new Thickness(5)));
-            properties.Columns.Add(new DataGridTextColumn { Header="Thuộc tính", Binding=new Binding("Key"), Width=new DataGridLength(1,DataGridLengthUnitType.Star), ElementStyle=style });
-            properties.Columns.Add(new DataGridTextColumn { Header="Giá trị", Binding=new Binding("Value"), Width=new DataGridLength(1.2,DataGridLengthUnitType.Star), ElementStyle=style });
+            properties.Columns.Add(new DataGridTextColumn { Header="Property", Binding=new Binding("Key"), Width=new DataGridLength(1,DataGridLengthUnitType.Star), ElementStyle=style });
+            properties.Columns.Add(new DataGridTextColumn { Header="Value", Binding=new Binding("Value"), Width=new DataGridLength(1.2,DataGridLengthUnitType.Star), ElementStyle=style });
             properties.GroupStyle.Add(new GroupStyle
             {
                 ContainerStyle = (Style)System.Windows.Markup.XamlReader.Parse(@"
@@ -92,23 +92,23 @@ namespace IFCInfo
         private static List<KeyValuePair<string,string>> Values(AirTerminalRow row)
         {
             var values = new List<KeyValuePair<string,string>>();
-            values.Add(new KeyValuePair<string,string>("Cao độ (mm)",row.Elevation));
+            values.Add(new KeyValuePair<string,string>("Elevation (mm)",row.Elevation));
             var duct=row.DuctSource;
             if (duct != null)
             {
-                foreach (var size in new[] { new KeyValuePair<string,double>("Chiều dài (mm)",duct.LengthMm),
-                    new KeyValuePair<string,double>("Rộng (mm)",duct.WidthMm),new KeyValuePair<string,double>("Cao (mm)",duct.HeightMm),
-                    new KeyValuePair<string,double>("Đường kính (mm)",duct.DiameterMm) })
+                foreach (var size in new[] { new KeyValuePair<string,double>("Length (mm)",duct.LengthMm),
+                    new KeyValuePair<string,double>("Width (mm)",duct.WidthMm),new KeyValuePair<string,double>("Height (mm)",duct.HeightMm),
+                    new KeyValuePair<string,double>("Diameter (mm)",duct.DiameterMm) })
                     if (size.Value>0) values.Add(new KeyValuePair<string,string>(size.Key,size.Value.ToString("R",System.Globalization.CultureInfo.InvariantCulture)));
             }
             values.Add(new KeyValuePair<string,string>("System Type",row.SystemType));
             values.Add(new KeyValuePair<string,string>("System Name",row.SystemName));
-            values.Add(new KeyValuePair<string,string>("Element ID trong link",row.ElementId));
+            values.Add(new KeyValuePair<string,string>("Element ID in link",row.ElementId));
             values.Add(new KeyValuePair<string,string>("IFC GUID",row.IfcGuid));
             foreach (var p in row.IfcProperties)
                 values.Add(new KeyValuePair<string,string>(p.Scope+" / "+p.SetName+" / "+p.Name,
                     p.Value+(string.IsNullOrEmpty(p.Unit)?"":" ["+p.Unit+"]")));
-            if (row.IfcProperties.Count==0) values.Add(new KeyValuePair<string,string>("Pset / Qto","Không có dữ liệu thuộc tính IFC đã đọc."));
+            if (row.IfcProperties.Count==0) values.Add(new KeyValuePair<string,string>("Pset / Qto","No IFC property data was read."));
             return values;
         }
 
@@ -117,10 +117,10 @@ namespace IFCInfo
             public object Convert(object value,System.Type targetType,object parameter,CultureInfo culture)
             {
                 string key=value as string ?? "";
-                if (key=="Cao độ (mm)") return "Constraints";
-                if (key=="Chiều dài (mm)" || key=="Rộng (mm)" || key=="Cao (mm)" || key=="Đường kính (mm)") return "Dimensions";
+                if (key=="Elevation (mm)") return "Constraints";
+                if (key=="Length (mm)" || key=="Width (mm)" || key=="Height (mm)" || key=="Diameter (mm)") return "Dimensions";
                 if (key=="System Type" || key=="System Name") return "Mechanical";
-                if (key=="Element ID trong link" || key=="IFC GUID") return "Identity Data";
+                if (key=="Element ID in link" || key=="IFC GUID") return "Identity Data";
                 var parts=key.Split(new[] { " / " },System.StringSplitOptions.None);
                 return parts.Length>=3 ? "IFC · "+parts[1] : "IFC Property Sets";
             }

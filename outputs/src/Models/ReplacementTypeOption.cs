@@ -1,6 +1,6 @@
-﻿namespace IFCInfo
+namespace IFCInfo
 {
-    /// <summary>Type trong model chính cùng khả năng đặt và Category tương ứng.</summary>
+    /// <summary>A host-model type with placement capabilities and category information.</summary>
     public sealed class ReplacementTypeOption
     {
         public long Id { get; set; }

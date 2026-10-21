@@ -8,7 +8,7 @@ using System.Windows.Media;
 
 namespace IFCInfo
 {
-    /// <summary>Bảng chỉ đọc hiển thị các đoạn bị bỏ qua và lý do đầy đủ.</summary>
+    /// <summary>Read-only table of skipped segments and complete reasons.</summary>
     internal sealed class SkippedDuctsPanel : Border
     {
         public SkippedDuctsPanel(List<string> issues)
@@ -24,11 +24,11 @@ namespace IFCInfo
             var header = new DockPanel();
             var badge = new Border { Background = IFCInfoWindow.Brush("#FFF0D8"), CornerRadius = new CornerRadius(10),
                 Padding = new Thickness(10,3,10,3), VerticalAlignment = VerticalAlignment.Center };
-            badge.Child = IFCInfoWindow.Text(issues.Count + " đoạn", 13, "#986017");
+            badge.Child = IFCInfoWindow.Text(issues.Count + " segments", 13, "#986017");
             DockPanel.SetDock(badge, Dock.Right); header.Children.Add(badge);
-            var title = IFCInfoWindow.Text("Các đoạn bỏ qua", 18, "#694B23");
+            var title = IFCInfoWindow.Text("Skipped segments", 18, "#694B23");
             title.FontWeight = FontWeights.SemiBold; header.Children.Add(title); body.Children.Add(header);
-            var hint = IFCInfoWindow.Text("Các đoạn dưới đây sẽ không được tạo trong lượt này. Chọn ô và nhấn Ctrl+C để sao chép.", 13, "#716B63");
+            var hint = IFCInfoWindow.Text("These segments will not be created in this run. Select cells and press Ctrl+C to copy.", 13, "#716B63");
             hint.Margin = new Thickness(0,7,0,14); body.Children.Add(hint);
             var rows = issues.Select(issue => {
                 string text = issue ?? "";
@@ -60,7 +60,7 @@ namespace IFCInfo
             textStyle.Setters.Add(new Setter(TextBlock.ForegroundProperty, IFCInfoWindow.Brush("#37322B")));
             textStyle.Setters.Add(new Setter(TextBlock.ToolTipProperty, new Binding("Reason")));
             table.Columns.Add(new DataGridTextColumn { Header = "Element ID", Binding = new Binding("ElementId"), Width = 115, ElementStyle = textStyle });
-            table.Columns.Add(new DataGridTextColumn { Header = "Lý do bỏ qua", MinWidth = 240, Binding = new Binding("Reason"), Width = new DataGridLength(1, DataGridLengthUnitType.Star), ElementStyle = textStyle });
+            table.Columns.Add(new DataGridTextColumn { Header = "Skip reason", MinWidth = 240, Binding = new Binding("Reason"), Width = new DataGridLength(1, DataGridLengthUnitType.Star), ElementStyle = textStyle });
             table.SizeChanged += (s, e) => table.Columns[1].Width = new DataGridLength(Math.Max(240, table.ActualWidth - 137));
             body.Children.Add(table);
         }

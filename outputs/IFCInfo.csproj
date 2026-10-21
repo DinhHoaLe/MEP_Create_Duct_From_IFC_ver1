@@ -1,7 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <RevitVersion Condition="'$(RevitVersion)' == ''">2023</RevitVersion>
-    <TargetFramework>net48</TargetFramework>
+    <TargetFramework Condition="'$(RevitVersion)' &lt; '2025'">net48</TargetFramework>
+    <TargetFramework Condition="'$(RevitVersion)' == '2025' Or '$(RevitVersion)' == '2026'">net8.0-windows</TargetFramework>
+    <TargetFramework Condition="'$(RevitVersion)' == '2027'">net10.0-windows</TargetFramework>
+    <UseWPF Condition="'$(RevitVersion)' &gt;= '2025'">true</UseWPF>
+    <LangVersion>latest</LangVersion>
+    <TargetFramework Condition="'$(RevitTargetFramework)' != ''">$(RevitTargetFramework)</TargetFramework>
     <RevitApiDir Condition="'$(RevitApiDir)' == ''">C:\Program Files\Autodesk\Revit $(RevitVersion)</RevitApiDir>
     <AssemblyName>IFCInfo</AssemblyName>
     <PlatformTarget>x64</PlatformTarget>
@@ -9,11 +14,12 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="src\**\*.cs" />
-    <Reference Include="PresentationFramework" />
-    <Reference Include="PresentationCore" />
-    <Reference Include="WindowsBase" />
-    <Reference Include="System.Xaml" />
-    <Reference Include="System.Web.Extensions" />
+    <EmbeddedResource Include="assets\create-duct-from-ifc.png" LogicalName="IFCInfo.CreateDuctIcon.png" />
+    <Reference Include="PresentationFramework" Condition="'$(RevitVersion)' &lt; '2025'" />
+    <Reference Include="PresentationCore" Condition="'$(RevitVersion)' &lt; '2025'" />
+    <Reference Include="WindowsBase" Condition="'$(RevitVersion)' &lt; '2025'" />
+    <Reference Include="System.Xaml" Condition="'$(RevitVersion)' &lt; '2025'" />
+    <Reference Include="System.Web.Extensions" Condition="'$(RevitVersion)' &lt; '2025'" />
     <Reference Include="RevitAPI">
       <HintPath>$(RevitApiDir)\RevitAPI.dll</HintPath>
       <Private>false</Private>
@@ -23,6 +29,9 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+  <Target Name="CheckRevitApi" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(RevitApiDir)\RevitAPI.dll')" Text="Revit $(RevitVersion) API is missing. Install the matching Revit/API or supply RevitApiDir. No compatible DLL can be verified without it." />
+  </Target>
   <Target Name="PublishLocalAddin" AfterTargets="Build" Condition="'$(AssemblyName)' == 'IFCInfo'">
     <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(MSBuildProjectDirectory)\IFCInfo.dll" />
   </Target>

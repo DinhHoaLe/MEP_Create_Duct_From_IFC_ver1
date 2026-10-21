@@ -3,7 +3,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+#if NETFRAMEWORK
 using System.Web.Script.Serialization;
+#else
+using System.Text.Json;
+#endif
 using System.Xml;
 
 namespace IFCInfo
@@ -23,7 +27,11 @@ namespace IFCInfo
             }
             else if(format==3)
             {
+#if NETFRAMEWORK
                 File.WriteAllText(path,new JavaScriptSerializer {MaxJsonLength=int.MaxValue}.Serialize(data),new UTF8Encoding(false));
+#else
+                File.WriteAllText(path,JsonSerializer.Serialize(data),new UTF8Encoding(false));
+#endif
             }
             else if(format==4)
             {

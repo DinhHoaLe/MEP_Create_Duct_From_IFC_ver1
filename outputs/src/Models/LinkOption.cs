@@ -1,6 +1,6 @@
-﻿namespace IFCInfo
+namespace IFCInfo
 {
-    /// <summary>Một IFC link dùng trong dropdown, kèm trạng thái load và đường dẫn nguồn.</summary>
+    /// <summary>An IFC link option with load state and source path.</summary>
     public sealed class LinkOption
     {
         public long Id { get; set; }
@@ -9,7 +9,7 @@
         public bool IsLoaded { get; set; }
         public override string ToString()
         {
-            return Name + (IsLoaded ? "" : " (chưa load)");
+            return Name + (IsLoaded ? "" : " (unloaded)");
         }
     }
 }

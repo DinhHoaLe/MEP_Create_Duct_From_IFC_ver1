@@ -10,7 +10,7 @@ using Autodesk.Revit.UI;
 
 namespace IFCInfo
 {
-    /// <summary>Đọc Category, parameter hệ thống và ghép dữ liệu IFC theo GUID.</summary>
+    /// <summary>Read categories and system parameters, then match IFC data by GUID.</summary>
     internal static class CategoryReader
     {
         public static void Configure(IFCInfoWindow window, Document linkedDoc, LinkOption linkOption)
@@ -45,14 +45,14 @@ namespace IFCInfo
             window.CanReplaceCategory = category != null && SupportedCategories.Contains(category.Id);
             window.CanCreateDucts = false;
             if (!window.CanReplaceCategory)
-                throw new InvalidOperationException("Category này chưa được hỗ trợ.");
+                throw new InvalidOperationException("This category is not supported.");
             bool isDuct = category.Id == (long)BuiltInCategory.OST_DuctCurves;
             window.CanCreateDucts = isDuct;
             bool readIfc = window.CanReplaceCategory || isDuct;
-            window.IfcSourceStatus = "Dữ liệu parameter trong Revit link.";
+            window.IfcSourceStatus = "Parameter data from the Revit link.";
             if (linkedDoc == null)
             {
-                window.AirTerminalError = "Không đọc được model link. Hãy load link rồi chạy lại tool.";
+                window.AirTerminalError = "Could not read the linked model. Load the link and run the tool again.";
                 return;
             }
             try
@@ -62,11 +62,17 @@ namespace IFCInfo
                 {
                     var picker = new Microsoft.Win32.OpenFileDialog
                     {
-                        Title = "Chọn IFC gốc của link để đọc hệ thống và cao độ",
+                        Title = "Select the original linked IFC to read systems and elevations",
                         Filter = "IFC STEP (*.ifc)|*.ifc",
                         CheckFileExists = true,
                         Multiselect = false
                     };
+                    if (!string.IsNullOrWhiteSpace(ifcPath))
+                    {
+                        string directory = Path.GetDirectoryName(ifcPath);
+                        if (Directory.Exists(directory)) picker.InitialDirectory = directory;
+                        picker.FileName = Path.GetFileName(ifcPath);
+                    }
                     if (picker.ShowDialog() == true)
                         ifcPath = linkOption.IfcPath = picker.FileName;
                 }
@@ -76,10 +82,10 @@ namespace IFCInfo
                     {
                         ifc = IfcSourceReader.Read(ifcPath);
                     }
-                    catch (Exception ex) { window.IfcSourceStatus = "Không đọc được IFC gốc: " + ex.Message; }
+                    catch (Exception ex) { window.IfcSourceStatus = "Could not read original IFC: " + ex.Message; }
                 }
                 else if (readIfc)
-                    window.IfcSourceStatus = "Chưa chọn IFC gốc. Chỉ đọc parameter trong Revit; chưa có cao độ IFC.";
+                    window.IfcSourceStatus = "No original IFC was selected. Only Revit parameters are available; IFC elevations are unavailable.";
                 var sourceElements = ifc?.Products;
                 int matched = 0;
                 // Count instances in the selected linked document, not the host/view.
@@ -101,14 +107,14 @@ namespace IFCInfo
                             ElementId = element.Id.ToString(),
                             Name = element.Name,
                             IfcGuid = guid,
-                            NativeShape = connector == null ? null : connector.Shape == ConnectorProfileType.Round ? "Tròn" :
+                            NativeShape = connector == null ? null : connector.Shape == ConnectorProfileType.Round ? "Round" :
                                 connector.Shape == ConnectorProfileType.Oval ? "Oval" : connector.Shape == ConnectorProfileType.Rectangular ?
-                                (Math.Abs(connector.Width - connector.Height) <= 0.1 / 304.8 ? "Vuông" : "Chữ nhật") : null,
+                                (Math.Abs(connector.Width - connector.Height) <= 0.1 / 304.8 ? "Square" : "Rectangular") : null,
                             SystemType = ReadSystemValue(element, category.Id==(long)BuiltInCategory.OST_PipeCurves
                                 ? BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM : BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM, "System Type"),
                             SystemName = ReadSystemValue(element, BuiltInParameter.RBS_SYSTEM_NAME_PARAM, "System Name"),
-                            Elevation = "Không có thông tin",
-                            DataSource = ifc == null ? "Parameter Revit" : "Chưa khớp IFC GUID; parameter Revit"
+                            Elevation = "No information",
+                            DataSource = ifc == null ? "Parameter Revit" : "No matching IFC GUID; using Revit parameters"
                         };
                         IfcTerminalSource sourceRow;
                         if (sourceElements != null && sourceElements.TryGetValue(guid, out sourceRow))
@@ -122,8 +128,8 @@ namespace IFCInfo
                                 row.SystemType = sourceRow.SystemType;
                             row.Elevation = sourceRow.ElevationMm.HasValue
                                 ? sourceRow.ElevationMm.Value.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)
-                                : "Không có thông tin";
-                            row.DataSource = "Khớp IFC GUID; ưu tiên IFC gốc";
+                                : "No information";
+                            row.DataSource = "IFC GUID matched; original IFC takes precedence";
                         }
                         if (row.IfcProperties.Count==0)
                         foreach (var candidate in new[] { element,linkedDoc.GetElement(element.GetTypeId()) }.Where(e=>e!=null))
@@ -141,14 +147,14 @@ namespace IFCInfo
                     window.AirTerminals = rows.OrderBy(row => row.SystemType).ThenBy(row => row.SystemName)
                       .ThenBy(row => row.ElementId).ToList();
                     if (ifc != null)
-                        window.IfcSourceStatus = string.Format("IFC gốc: {0}\nKhớp GUID: {1}/{2} phần tử trong link. IFC có {3} phần tử nguồn thuộc nhóm {4}. " +
-                            "Dữ liệu lấy từ phiên bản IFC trên đĩa; hãy reload link nếu IFC đã thay đổi.",
+                        window.IfcSourceStatus = string.Format("Original IFC: {0}\nGUID matches: {1}/{2} linked elements. IFC contains {3} source elements in group {4}. " +
+                            "Data comes from the IFC file on disk; reload the link if the IFC has changed.",
                             ifcPath, matched, terminals.Count, sourceElements.Count, "IFC Product");
                 }
             }
             catch (Exception ex)
             {
-                window.AirTerminalError = "Không thể đọc Category: " + ex.Message;
+                window.AirTerminalError = "Could not read category: " + ex.Message;
             }
         }
 
@@ -197,7 +203,7 @@ namespace IFCInfo
                 if (values.Count > 0)
                     return string.Join("; ", values);
             }
-            return "Không có thông tin";
+            return "No information";
         }
 
         private static string ParameterText(Parameter parameter, Document doc)

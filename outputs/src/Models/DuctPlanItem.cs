@@ -1,8 +1,8 @@
-﻿using Autodesk.Revit.DB;
+using Autodesk.Revit.DB;
 
 namespace IFCInfo
 {
-    /// <summary>Một đoạn Duct đã xác định hình học trong tọa độ model chính, chờ tạo.</summary>
+    /// <summary>A planned duct segment with geometry in host-model coordinates.</summary>
     public sealed class DuctPlanItem : System.ComponentModel.INotifyPropertyChanged
     {
         public AirTerminalRow Source;
@@ -30,7 +30,7 @@ namespace IFCInfo
         }
         public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
         public string PreviewSource => Source?.ElementId;
-        public string PreviewTarget => ExistingId > 0 ? ExistingId.ToString() : "Mới";
-        public string PreviewChange => ChangeSummary ?? "Tạo mới";
+        public string PreviewTarget => ExistingId > 0 ? ExistingId.ToString() : "New";
+        public string PreviewChange => ChangeSummary ?? "Create new";
     }
 }

@@ -1,35 +1,59 @@
 # MEP_Create_Duct_From_IFC_ver1
 
-Add-in C# cho Revit 2024, .NET Framework 4.8, x64: đọc IFC link, tạo/cập nhật Duct và tạo Air Terminal trong model chính.
+C# add-in for Revit 2023/2024, .NET Framework 4.8, x64. Reads linked IFC models and creates or updates native MEP elements in the host model.
 
-## Gói gửi cho người dùng Revit 2024
+## Test with Add-in Manager in Revit 2023
 
-Chạy `pwsh -NoProfile -File tools/Package-RevitAddin.ps1` để build và tạo `release/IFCInfo-Revit2024.zip`. Gửi file ZIP này; người nhận giải nén toàn bộ, đóng Revit, nhấn đúp `Install.cmd`, rồi mở Revit 2024 → Add-Ins → External Tools → IFC Info. Trình cài đặt chỉ cài cho tài khoản Windows hiện tại, không cần quyền Administrator hay pyRevit. Xem `HUONG_DAN.txt` trong ZIP.
+Load `release/IFCInfo-Revit2023/IFCInfo_Revit2023.dll` and run `IFCInfo.IFCInfoCommand`. No installer or .addin manifest is required. If Revit has retained a previous DLL, restart Revit before loading the new build.
 
-## Cấu trúc
-
-- `outputs/IFCInfo.csproj`: dự án add-in; mã nguồn trong `outputs/src/`.
-- `outputs/IFCInfo.dll`: DLL phát hành, cập nhật sau khi build và kiểm tra thành công.
-- `outputs/tests/`: kiểm tra reader, chống trùng, snapshot, connector và WPF.
-- `tools/UiPreview/`: xem trước giao diện IFC/Duct và kiểm tra hồi quy WPF, không thao tác model.
-- `tools/CadInspection/`: công cụ phụ đọc CAD/DXF, xem `tools/README.md`.
-
-Dự án này không chứa CableTrayFromCad; công cụ IFC không phụ thuộc dự án Cable Tray bên cạnh.
-
-## Hướng dẫn và kiểm tra
-
-Xem [hướng dẫn sử dụng hiện tại](outputs/HUONG_DAN_CSHARP.txt), [phạm vi IFC](outputs/IFC_COMPATIBILITY.md), [đối chiếu Duct](outputs/DUCT_COMPARISON.md) và [ghi chú sửa lỗi](outputs/CHANGELOG.md).
-
-Chạy từ thư mục gốc bằng PowerShell 7:
+Select a loaded IFC link and a source category, then check the elements to create. The tool finds the original IFC beside the link when possible. After a create/update run, click **Back to tool** in the report to return to the refreshed source list. Use **Back** to select another link or category. Close the main window to end the session.
 
 ```powershell
-dotnet build outputs/IFCInfo.csproj -c Release
+dotnet build outputs/IFCInfo.csproj -c Release -p:RevitVersion=2023 -p:AssemblyName=IFCInfo_Revit2023
+```
+
+Copy the DLL/PDB from `outputs/bin/Release/net48/` into `release/IFCInfo-Revit2023/`. The separate assembly name preserves the Revit 2024 DLL in `outputs/IFCInfo.dll`.
+
+## Revit 2024 package
+
+`pwsh -NoProfile -File tools/Package-RevitAddin.ps1` builds and creates `release/IFCInfo-Revit2024.zip`. Add-in Manager can load the DLL directly. The optional installer in this package installs for the current Windows account without Administrator privileges or pyRevit; see `README.txt` in the package.
+
+## Repository layout
+
+- `outputs/IFCInfo.csproj` and `outputs/src/`: add-in project and source code.
+- `outputs/assets/`: project artwork embedded in the DLL; no external image file is needed at runtime.
+- `outputs/IFCInfo.dll`: published Revit 2024 DLL.
+- `outputs/tests/`: IFC reader, paths, properties, duplicate detection, snapshots, connections and UI checks.
+- `tools/UiPreview/`: WPF preview and regression runner, without model transactions.
+- `tools/revit-installer/`: optional Revit 2024 installer source.
+- `Revit/`: local IFC/RVT fixtures, excluded from Git.
+- `.cleanup-archive/`: reversible cleanup archive, excluded from Git.
+
+See [user guide](outputs/USER_GUIDE.txt), [IFC compatibility](outputs/IFC_COMPATIBILITY.md), [duct comparison](outputs/DUCT_COMPARISON.md), [acceptance checklist](outputs/ACCEPTANCE_CHECKLIST.md) and [changelog](outputs/CHANGELOG.md).
+
+## Validation
+
+Run from the repository root with PowerShell 7:
+
+```powershell
 pwsh -NoProfile -File outputs/tests/Test-IfcReader.ps1
+pwsh -NoProfile -File outputs/tests/Test-IfcSourcePath.ps1
+pwsh -NoProfile -File outputs/tests/Test-IfcReaderEdgeCases.ps1
+pwsh -NoProfile -File outputs/tests/Test-IfcSample.ps1
+pwsh -NoProfile -File outputs/tests/Test-IfcProperties.ps1
+pwsh -NoProfile -File outputs/tests/Test-IfcSelectionCsv.ps1
 pwsh -NoProfile -File outputs/tests/Test-DuctCoverage.ps1
 pwsh -NoProfile -File outputs/tests/Test-DuctEnhancements.ps1
 pwsh -NoProfile -File outputs/tests/Test-DuctUi.ps1
 ```
 
-Cần cài Revit 2024 và .NET Framework 4.8 Developer Pack. Khi Revit nằm ở vị trí khác, truyền `-p:RevitApiDir="đường dẫn Revit 2024"` vào lệnh build. Các test logic cần PowerShell 7; kiểm tra WPF chạy bằng executable .NET Framework trên Windows.
+Build requires the matching Revit API and .NET Framework 4.8 Developer Pack. The default project/preview target is Revit 2023. Override `RevitVersion` and `RevitApiDir` for another installation. DLL reflection checks require x64 PowerShell. Creation, updates and connector operations modify the model; offscreen tests do not replace acceptance tests in Revit.
 
-Chức năng tạo/cập nhật và nối connector có sửa model. Test ngoài Revit không thay thế nghiệm thu trên RVT thử nghiệm; xem checklist trong `outputs/TIEN_DO_7_BUOC.md`.
+## Versioned builds and IFC classification (21 October 2026)
+
+- Run tools/Build-RevitVersion.ps1 -RevitVersion 2023, 2024, 2025, 2026 or 2027. Supply -RevitApiDir for an external matching API installation.
+- 2025 was built against API 25.4.60.9 with net8.0-windows. The installed 2026 API is 26.5.0.55 and references .NET 10; its package targets net10.0-windows and is not for earlier .NET 8 installations. Use a matching older API and -TargetFramework net8.0-windows to build for those installations.
+- 2027 targets net10.0-windows but no API 2027 is available locally. No Revit 2027 DLL has been built or verified.
+- 136 WPF checks passed on .NET Framework 4.8, .NET 8 and .NET 10 during this change. Live Revit transactions remain unverified. Modern API builds retain two dependency-resolution warnings.
+- Duct Settings now places the source table above Level & General Options in the right sidebar with a horizontal divider. Tabs share the beige theme.
+- New system classification follows explicit IFC classification properties when recognized. Name-based suggestions (including ABLUFT -> ExhaustAir) are labeled as suggestions and can be overridden. Unknown or conflicting classifications require manual input. Existing project-only mapping remains a separate option.

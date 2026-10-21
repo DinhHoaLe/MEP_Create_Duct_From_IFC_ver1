@@ -1,10 +1,10 @@
-﻿namespace IFCInfo
+namespace IFCInfo
 {
-    /// <summary>Một lựa chọn Duct Type hoặc System Type trong hộp thoại.</summary>
+    /// <summary>A duct type or system type choice in the settings dialog.</summary>
     public sealed class DuctChoice
     {
         public long Id;
-        public string Name;
+        public string Name; public string Classification;
         public override string ToString() => Name;
     }
 }

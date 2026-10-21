@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Markup;
 using System.Windows.Media;
@@ -11,6 +11,7 @@ namespace IFCInfo
         // Shared warm, flat window frame matching Family Data Studio.
         internal static void SetContent(Window window, FrameworkElement content)
         {
+            window.Icon = ProjectIcon;
             window.WindowStyle = WindowStyle.None;
             window.Background = Background;
             window.Foreground = IFCInfoWindow.Brush("#37322B");
@@ -31,15 +32,15 @@ namespace IFCInfo
             caption.Children.Add(controls);
             if (window.ResizeMode != ResizeMode.NoResize)
             {
-                controls.Children.Add(ChromeButton("−", "Thu nhỏ", () => SystemCommands.MinimizeWindow(window)));
+                controls.Children.Add(ChromeButton("−", "Minimize", () => SystemCommands.MinimizeWindow(window)));
                 if (window.ResizeMode != ResizeMode.CanMinimize)
-                    controls.Children.Add(ChromeButton("□", "Phóng to / Khôi phục", () =>
+                    controls.Children.Add(ChromeButton("□", "Maximize / Restore", () =>
                     {
                         if (window.WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(window);
                         else SystemCommands.MaximizeWindow(window);
                     }));
             }
-            controls.Children.Add(ChromeButton("×", "Đóng", () => window.Close()));
+            controls.Children.Add(ChromeButton("×", "Close", () => window.Close()));
             var title = IFCInfoWindow.Text(window.Title, 13, "#37322B");
             title.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding("Title") { Source = window });
             title.VerticalAlignment = VerticalAlignment.Center;
@@ -72,6 +73,27 @@ namespace IFCInfo
         }
 
         internal static FrameworkElement Parse(string xaml) => (FrameworkElement)XamlReader.Parse(xaml);
+        internal static void StyleWorkflowTabs(TabControl tabs)
+        {
+            tabs.BorderThickness=new Thickness(0);
+            tabs.Padding=new Thickness(0,12,0,0);
+            tabs.ItemContainerStyle=(Style)XamlReader.Parse(@"
+<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='TabItem'>
+ <Setter Property='Foreground' Value='#716B63'/><Setter Property='Background' Value='#E8E2DA'/>
+ <Setter Property='Margin' Value='0,0,5,0'/><Setter Property='Padding' Value='22,12'/>
+ <Setter Property='FontSize' Value='14'/><Setter Property='MinHeight' Value='44'/>
+ <Setter Property='Template'><Setter.Value><ControlTemplate TargetType='TabItem'>
+  <Border x:Name='surface' Background='{TemplateBinding Background}' BorderBrush='#DDD6CE' BorderThickness='1' CornerRadius='8,8,0,0' Padding='{TemplateBinding Padding}'>
+   <ContentPresenter ContentSource='Header' HorizontalAlignment='Center' VerticalAlignment='Center'/>
+  </Border>
+  <ControlTemplate.Triggers>
+   <Trigger Property='IsSelected' Value='True'><Setter Property='Foreground' Value='#37322B'/><Setter Property='FontWeight' Value='SemiBold'/><Setter TargetName='surface' Property='Background' Value='White'/><Setter TargetName='surface' Property='BorderThickness' Value='1,1,1,0'/></Trigger>
+   <Trigger Property='IsMouseOver' Value='True'><Setter TargetName='surface' Property='Background' Value='#F5F2EE'/></Trigger>
+   <Trigger Property='IsEnabled' Value='False'><Setter Property='Opacity' Value='.5'/></Trigger>
+  </ControlTemplate.Triggers>
+ </ControlTemplate></Setter.Value></Setter>
+</Style>");
+        }
         internal static Grid SettingsColumns(StackPanel left, StackPanel right)
         {
             var grid = new Grid();
@@ -124,13 +146,28 @@ namespace IFCInfo
             ShadowDepth = 1,
             Opacity = opacity * .3
         };
-        internal static FrameworkElement Logo() => Parse(@"
-<Grid xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' Width='88' Height='94'>
- <Path Data='M8,2 L57,2 77,22 77,78 Q77,86 69,86 L8,86 Q2,86 2,78 L2,10 Q2,2 8,2Z' Fill='#E8E2DA' Stroke='#DDD6CE' StrokeThickness='1.2'/>
- <Path Data='M57,2 L57,17 Q57,22 63,22 L77,22Z' Fill='#B3A491'/>
- <Path Data='M22,34 L37,25 52,34 52,52 37,61 22,52Z M37,25 L37,43 52,52 M22,34 L37,43 52,34 M37,43 L37,61 M22,52 L37,34 52,52' Stroke='#90805C' StrokeThickness='2.5' StrokeLineJoin='Round'/>
- <Border Background='#6F6044' CornerRadius='5' HorizontalAlignment='Right' VerticalAlignment='Bottom' Padding='10,3' Margin='0,0,0,3'><TextBlock Text='IFC' FontSize='18' FontWeight='SemiBold' Foreground='White'/></Border>
-</Grid>");
+        private static System.Windows.Media.Imaging.BitmapSource projectIcon;
+        internal static System.Windows.Media.Imaging.BitmapSource ProjectIcon
+        {
+            get
+            {
+                if (projectIcon != null) return projectIcon;
+                using (var stream = typeof(UiDesign).Assembly.GetManifestResourceStream("IFCInfo.CreateDuctIcon.png"))
+                {
+                    var bitmap = new System.Windows.Media.Imaging.BitmapImage();
+                    bitmap.BeginInit();
+                    bitmap.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                    bitmap.StreamSource = stream;
+                    bitmap.EndInit();
+                    bitmap.Freeze();
+                    return projectIcon = bitmap;
+                }
+            }
+        }
+        internal static FrameworkElement Logo() => new Image
+        {
+            Source = ProjectIcon, Width = 100, Height = 94, Stretch = Stretch.Uniform
+        };
         internal static FrameworkElement Icon(bool category)
         {
             var tile = new Border
@@ -162,7 +199,7 @@ namespace IFCInfo
             var grid = new Grid { Width = 340, VerticalAlignment = VerticalAlignment.Center };
             for (int i = 0; i < 5; i++)
                 grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(i % 2 == 0 ? 90 : 35) });
-            var labels = new[] { "Chọn link\nvà Category", "Chọn phần tử\nvà Type", "Tạo và hoàn tất" };
+            var labels = new[] { "Select link\nand category", "Select elements\nand type", "Create and finish" };
             for (int i = 0; i < 3; i++)
             {
                 bool current = i + 1 == active;
