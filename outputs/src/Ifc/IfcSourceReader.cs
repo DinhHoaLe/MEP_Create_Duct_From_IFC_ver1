@@ -23,6 +23,7 @@ namespace IFCInfo
         }
         private readonly Dictionary<int, Entity> entities = new Dictionary<int, Entity>();
         private readonly Dictionary<int, double[]> placements = new Dictionary<int, double[]>();
+        private double? projectLengthMm;
         public Dictionary<string, IfcTerminalSource> Products { get; private set; } = new Dictionary<string, IfcTerminalSource>(StringComparer.Ordinal);
         public Dictionary<string, IfcTerminalSource> Terminals
         {
@@ -123,6 +124,9 @@ namespace IFCInfo
                     result.Append((char)int.Parse(m.Groups[1].Value.Substring(i, 4), NumberStyles.HexNumber));
                 return result.ToString();
             });
+            // Legacy STEP Latin-1 escapes are common in German IFC property names (Länge / Höhe).
+            value = Regex.Replace(value, @"\\X\\([0-9A-Fa-f]{2})", m =>
+                ((char)int.Parse(m.Groups[1].Value,NumberStyles.HexNumber,CultureInfo.InvariantCulture)).ToString());
             return value;
         }
         private static int Ref(string token)
@@ -185,6 +189,7 @@ namespace IFCInfo
             { /* Unknown units must never be silently interpreted as metres. */
             }
 
+            projectLengthMm = millimetres;
             var productIds = entities.Where(p =>
                 (Ref(p.Value.At(5)) != 0 && entities.ContainsKey(Ref(p.Value.At(5))) && Get(Ref(p.Value.At(5))).Kind.EndsWith("PLACEMENT",StringComparison.Ordinal)) ||
                 (Ref(p.Value.At(6)) != 0 && entities.ContainsKey(Ref(p.Value.At(6))) && Get(Ref(p.Value.At(6))).Kind == "IFCPRODUCTDEFINITIONSHAPE"))
@@ -280,7 +285,16 @@ namespace IFCInfo
                 }
                 string unitText="";
                 if (Ref(unit)!=0 && entities.TryGetValue(Ref(unit),out var u)) unitText=u.Kind=="IFCSIUNIT" ? (u.At(2)=="$"?"":u.At(2).Trim('.'))+u.At(3).Trim('.') : u.Kind=="IFCCONVERSIONBASEDUNIT" ? Label(u.At(2)) : unit;
-                output.Add(new IfcPropertyValue { Scope=scope,SetName=setName,Name=name,Value=value,Unit=unitText });
+                double? lengthMm=null;
+                if (p.Kind=="IFCQUANTITYLENGTH" || (p.Kind=="IFCPROPERTYSINGLEVALUE" &&
+                    (p.At(2).StartsWith("IFCLENGTHMEASURE(",StringComparison.Ordinal) || p.At(2).StartsWith("IFCPOSITIVELENGTHMEASURE(",StringComparison.Ordinal))))
+                {
+                    double numeric;
+                    double? scale=projectLengthMm;
+                    if(Ref(unit)!=0) { try { scale=UnitMetres(Ref(unit),0)*1000; } catch(NotSupportedException) {scale=null;} catch(FormatException) {scale=null;} }
+                    if(scale.HasValue && double.TryParse(value,NumberStyles.Float,CultureInfo.InvariantCulture,out numeric) && numeric>0)lengthMm=numeric*scale.Value;
+                }
+                output.Add(new IfcPropertyValue { Scope=scope,SetName=setName,Name=name,Value=value,Unit=unitText,LengthMm=lengthMm });
             }
             path.Remove(id);
         }
@@ -360,6 +374,46 @@ namespace IFCInfo
             result.LengthMm = Number(solid.At(3)) * sz * mm.Value;
             if (result.LengthMm <= 0 || (result.DiameterMm <= 0 && (result.WidthMm <= 0 || result.HeightMm <= 0)))
                 throw new FormatException("Invalid IFC dimensions.");
+            ResolveDimensionRoles(result);
+        }
+        // An extrusion's depth is a modelling axis, not necessarily the duct's longitudinal axis.
+        private static void ResolveDimensionRoles(IfcTerminalSource result)
+        {
+            Func<string,double?> declared = name =>
+            {
+                string german=name=="Length"?"Länge":name=="Width"?"Breite":"Höhe";
+                var candidates=result.Properties.Where(p=>p.LengthMm.HasValue && p.Scope!="System" &&
+                    (name!="Length" || p.Scope=="Instance") &&
+                    ((p.SetName=="Qto_DuctSegmentBaseQuantities" && p.Name==name) ||
+                     (p.SetName=="Pset_DuctSegmentTypeCommon" && p.Name=="Nominal"+name) ||
+                     string.Equals(p.Name,name,StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(p.Name,german,StringComparison.OrdinalIgnoreCase))).ToList();
+                var instance=candidates.Where(p=>p.Scope=="Instance").ToList();
+                if(instance.Count>0)candidates=instance;
+                if(candidates.Count==0)return null;
+                double value=candidates[0].LengthMm.Value;
+                if(candidates.Any(p=>Math.Abs(p.LengthMm.Value-value)>0.6))throw new NotSupportedException("Conflicting IFC "+name+" values; cannot determine duct axes safely.");
+                return value;
+            };
+            double? length=declared("Length"), width=declared("Width"), height=declared("Height");
+            Func<double,double?,bool> fits=(actual,wanted)=>!wanted.HasValue || Math.Abs(actual-wanted.Value)<=0.6;
+            if(result.ProfileShape!="Rectangular")
+            {
+                if(!fits(result.LengthMm,length))throw new NotSupportedException("IFC Length conflicts with extrusion depth; verify the source geometry.");
+                return;
+            }
+            var original=new[]{result.LengthMm,result.WidthMm,result.HeightMm};
+            if(fits(original[0],length)&&fits(original[1],width)&&fits(original[2],height))return;
+            // Reassign only dimensions actually present in the solid; never stretch geometry to fit metadata.
+            var choices=new List<double[]>();
+            for(int a=0;a<3;a++)for(int b=0;b<3;b++)if(a!=b)
+            {
+                int c=3-a-b;var candidate=new[]{original[a],original[b],original[c]};
+                if(fits(candidate[0],length)&&fits(candidate[1],width)&&fits(candidate[2],height) &&
+                    !choices.Any(x=>x.Zip(candidate,(v,w)=>Math.Abs(v-w)<=0.6).All(x=>x)))choices.Add(candidate);
+            }
+            if(choices.Count!=1)throw new NotSupportedException("IFC Length/Width/Height do not uniquely identify the duct axis ("+choices.Count+" matches). Verify source dimensions.");
+            result.LengthMm=choices[0][0];result.WidthMm=choices[0][1];result.HeightMm=choices[0][2];
         }
         private Entity ResolveDuctSolid(int id, ref double[] transform, HashSet<int> visiting)
         {

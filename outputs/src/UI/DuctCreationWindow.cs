@@ -102,7 +102,7 @@ namespace IFCInfo
             Action refreshProjectStatus=()=> {
                 projectStatus.Text=mode.SelectedIndex==0?"Manual: configure the system in each group."
                     :autoMode.SelectedIndex==0?(commonSystem.SelectedItem==null?"Select one existing HVAC system type.":"All group system controls are locked to the shared type.")
-                    :"IFC mapping applies to all groups in this run. Exact name and classification matches are reused; unmatched names create new types on Create. Unresolved or conflicting classifications require Manual.";
+                    :"IFC mapping checks project system names first (ignoring case and surrounding spaces). Existing names are assigned directly using their Revit classification; missing names create new types on Create. New types with unresolved classifications require Manual.";
             };
             Action applyMode=()=> {
                 bool auto=mode.SelectedIndex==1;

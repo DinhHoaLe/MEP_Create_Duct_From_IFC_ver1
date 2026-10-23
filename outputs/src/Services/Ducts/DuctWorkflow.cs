@@ -14,6 +14,9 @@ namespace IFCInfo
     {
         public static void Configure(IFCInfoWindow window, Document doc, RevitLinkInstance link)
         {
+            window.CheckParameterTarget=name=>DuctParameterMapping.Check(doc,name);
+            window.LoadParameterTargets=()=>DuctParameterMapping.Targets(doc);
+            window.TransferParameters=(rows,maps)=>DuctParameterMapping.Transfer(doc,link,rows,maps);
             var loadCategory = window.LoadCategory;
             window.LoadCategory = category =>
             {
@@ -103,4 +106,5 @@ namespace IFCInfo
 
     }
 }
+
 

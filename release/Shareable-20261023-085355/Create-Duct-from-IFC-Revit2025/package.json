@@ -1,0 +1,17 @@
+{
+  "RevitVersion": 2025,
+  "Variants": [
+    {
+      "Directory": "runtime-8",
+      "RuntimeMajor": 8,
+      "SHA256": "108343A41410F7518C7F552E59D7D175C9FB044F7C310F371C0A2F748EC88B69"
+    },
+    {
+      "Directory": "runtime-10",
+      "RuntimeMajor": 10,
+      "SHA256": "B2F7F0DD7D9CDDBCCC5E5E6D1BEE969D8A1FBF220929DC8362B951F7F8F3A8C8"
+    }
+  ],
+  "Product": "Create Duct from IFC",
+  "PackageVersion": "20261023-085355"
+}

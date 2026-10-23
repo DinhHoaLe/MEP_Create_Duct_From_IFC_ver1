@@ -1,0 +1,36 @@
+﻿CREATE DUCT FROM IFC — BỘ CÀI REVIT 2025
+
+CÀI ĐẶT
+1. Giải nén toàn bộ ZIP; không chạy Install trực tiếp trong ZIP.
+2. Đóng tất cả cửa sổ Revit.
+3. Mở thư mục Create-Duct-from-IFC-Revit2025 vừa giải nén.
+4. Nhấn đúp Install.cmd. Không cần quyền Administrator.
+5. Mở lại Revit và project, chọn:
+   Add-Ins > External Tools > Create Duct from IFC.
+Bộ cài tự kiểm tra Revit 2025 và chọn DLL .NET 8 hoặc .NET 10 phù hợp.
+Không tự chọn/copy DLL bên trong runtime-8 hoặc runtime-10.
+Nếu Revit cài ở vị trí khác, bộ cài sẽ hỏi đường dẫn thư mục chứa RevitAPI.dll.
+Sau khi nâng cấp Revit sang runtime mới, đóng Revit và chạy lại Install.cmd.
+Nếu Revit hỏi về add-in chưa ký số, chỉ cho phép khi tin tưởng người gửi.
+
+SỬ DỤNG
+- Source: chọn IFC link đã load và Category.
+- Elements: xem thuộc tính, tick các phần tử cần tạo.
+- Duct Settings: chọn Duct Type theo nhóm, System Type và Level.
+- Map IFC systems: gán hệ thống cùng tên đã có; tên chưa có được tạo khi bấm Create.
+- Kiểm tra báo cáo kết quả; Back to tool để tiếp tục.
+
+CẬP NHẬT / GỠ CÀI ĐẶT
+Cập nhật: đóng Revit, chạy Install.cmd từ bộ cài mới.
+Gỡ cài đặt: đóng Revit, xóa IFCInfo.addin và thư mục IFCInfo tại:
+%APPDATA%\Autodesk\Revit\Addins\2025.
+Bộ cài chỉ áp dụng cho tài khoản Windows đang đăng nhập.
+Nếu công ty đã cài IFCInfo trong thư mục add-in dùng chung, nhờ IT kiểm tra
+để tránh nạp đồng thời hai bản.
+
+PHẠM VI
+- Add-in Revit native; không cần pyRevit, Add-in Manager hay Visual Studio.
+- UI tiếng Anh. Không kèm mã nguồn hoặc thư viện Autodesk.
+- Chỉ dùng cho Revit 2025; không nạp vào phiên bản khác.
+- Tạo/cập nhật phần tử làm thay đổi model. Thử trên bản sao project trước.
+- Build và kiểm tra UI đã qua; giao dịch tạo model thực tế vẫn cần nghiệm thu.

@@ -40,6 +40,7 @@ namespace IFCInfo
                 group.Start();
                 try
                 {
+                    if(request.ParameterMappings.Count>0)RunTransaction(doc,"IFC - Create mapped parameters",()=>DuctParameterMapping.Ensure(doc,request.ParameterMappings));
                     foreach (var item in request.Items)
                     {
                         var row=new DuctRunRow { RunId=run,SourceId=item.Source.ElementId,IfcGuid=item.Source.IfcGuid,IfcPsets=IfcPropertyStorage.Text(item.Source) }; rows.Add(row);
@@ -49,7 +50,7 @@ namespace IFCInfo
                             long id=0, resolvedSystem=0;
                             RunTransaction(doc,"IFC - "+item.Source.ElementId,()=>
                             {
-                                var duct=CreateOrUpdate(doc,item,request); DuctRevision.Save(duct,item,run); id=duct.Id.Number();
+                                var duct=CreateOrUpdate(doc,item,request); DuctParameterMapping.Apply(duct,item.Source,request.ParameterMappings); DuctRevision.Save(duct,item,run); id=duct.Id.Number();
                                 resolvedSystem=duct.get_Parameter(BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM).AsElementId().Number();
                             });
                             request.SystemTypes[item.GroupKey]=resolvedSystem;
@@ -58,6 +59,7 @@ namespace IFCInfo
                         }
                         catch (Exception ex) { row.Status="Error"; row.Reason=ex.Message; if (!request.KeepSuccessful) throw; }
                     }
+                    if(successful.Count==0 && request.ParameterMappings.Count>0)throw new InvalidOperationException("No ducts succeeded; parameter changes were rolled back.");
                     if (request.CreateFittings || request.ConnectTerminals) DuctConnections.Execute(doc,successful.Keys.ToList(),request,rows,run);
                     if (successful.Count>0)
                     {
@@ -232,3 +234,4 @@ namespace IFCInfo
         }
     }
 }
+

@@ -99,4 +99,35 @@ Assert ([bool](Read-Sample $rounded).Ducts['duct'].GeometryError) 'Do not conver
 $ellipse = $sample.Replace('IFCRECTANGLEPROFILEDEF(.AREA.,$,$,200.,100.)', 'IFCELLIPSEPROFILEDEF(.AREA.,$,$,100.,50.)')
 $d = (Read-Sample $ellipse).Ducts['duct']
 Assert ($d.ProfileShape -eq 'Oval' -and [bool]$d.GeometryError) 'Identify ellipse but reject lossy conversion'
+# Exporters may extrude along the duct width instead of its longitudinal axis.
+$quantities = @'
+#100=IFCELEMENTQUANTITY('q',$,'Qto_DuctSegmentBaseQuantities',$,$,(#101,#102,#103));
+#101=IFCQUANTITYLENGTH('Length',$,$,1000.,$);
+#102=IFCQUANTITYLENGTH('Width',$,$,200.,$);
+#103=IFCQUANTITYLENGTH('Height',$,$,100.,$);
+#104=IFCRELDEFINESBYPROPERTIES('r',$,$,$,(#4),#100);
+'@
+$swapped=$sample.Replace('IFCEXTRUDEDAREASOLID(#11,#6,#12,1000.)','IFCEXTRUDEDAREASOLID(#11,#6,#12,200.)').Replace('IFCRECTANGLEPROFILEDEF(.AREA.,$,$,200.,100.)','IFCRECTANGLEPROFILEDEF(.AREA.,$,$,1000.,100.)')+$quantities
+$d=(Read-Sample $swapped).Ducts['duct']
+Assert (!$d.GeometryError -and $d.LengthMm -eq 1000 -and $d.WidthMm -eq 200 -and $d.HeightMm -eq 100) 'Length must follow quantities, not widthwise extrusion'
+$short=$swapped.Replace('1000.','80.')
+$d=(Read-Sample $short).Ducts['duct']
+Assert (!$d.GeometryError -and $d.LengthMm -eq 80 -and $d.WidthMm -eq 200) 'Do not use the longest bounding dimension as length'
+$conflict=$swapped.Replace("'Length',`$,`$,1000.","'Length',`$,`$,9999.")
+Assert ([bool](Read-Sample $conflict).Ducts['duct'].GeometryError) 'Reject contradictory quantity and geometry'
+$ambiguous=$swapped.Replace('(#101,#102,#103)','(#101)')
+Assert ([bool](Read-Sample $ambiguous).Ducts['duct'].GeometryError) 'Do not guess section axes when only length is known'
+$millimetres=$swapped.Replace("'Length',`$,`$,1000.","'Length',`$,#110,1.")+"`n#110=IFCSIUNIT(*,.LENGTHUNIT.,`$,.METRE.);"
+$d=(Read-Sample $millimetres).Ducts['duct']
+Assert (!$d.GeometryError -and $d.LengthMm -eq 1000) 'Explicit quantity units override project millimetres'
+$german = $sample.Replace('IFCEXTRUDEDAREASOLID(#11,#6,#12,1000.)','IFCEXTRUDEDAREASOLID(#11,#6,#12,350.)').Replace('IFCRECTANGLEPROFILEDEF(.AREA.,$,$,200.,100.)','IFCRECTANGLEPROFILEDEF(.AREA.,$,$,2256.8862688666832,700.)') + @'
+#100=IFCPROPERTYSET('p',$,'KFN Pset HT',$,(#101,#102,#103));
+#101=IFCPROPERTYSINGLEVALUE('L\X\E4nge',$,IFCLENGTHMEASURE(2256.8862688666832),$);
+#102=IFCPROPERTYSINGLEVALUE('Breite',$,IFCLENGTHMEASURE(700.),$);
+#103=IFCPROPERTYSINGLEVALUE('H\X\F6he',$,IFCLENGTHMEASURE(350.),$);
+#104=IFCRELDEFINESBYPROPERTIES('r',$,$,$,(#4),#100);
+'@
+$d=(Read-Sample $german).Ducts['duct']
+Assert (!$d.GeometryError -and [Math]::Abs($d.LengthMm-2256.8862688666832) -lt 0.001 -and $d.WidthMm -eq 700 -and $d.HeightMm -eq 350) 'German KFN dimensions: all three axes reassigned from heightwise extrusion'
+Assert (@($d.Properties | Where-Object Name -eq 'Länge').Count -eq 1 -and @($d.Properties | Where-Object Name -eq 'Höhe').Count -eq 1) 'Decode legacy STEP Latin-1 property labels'
 Write-Output "PASS: $script:checks assertions"

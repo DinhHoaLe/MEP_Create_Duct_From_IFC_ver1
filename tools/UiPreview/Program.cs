@@ -16,6 +16,54 @@ using IFCInfo;
 internal static class Program
 {
     private static int checks;
+    private static void TestParameterMapping()
+    {
+        var row=new AirTerminalRow {IsSelected=true,IfcProperties=new List<IfcPropertyValue> {
+            new IfcPropertyValue {Scope="Instance",SetName="A",Name="Code",Value="01"},
+            new IfcPropertyValue {Scope="Instance",SetName="B",Name="Code",Value="02"},
+            new IfcPropertyValue {Name="Length",Value="125",Unit="mm"}}};
+        Assert(IfcParameterMapping.Read(row,IfcParameterMapping.Key(row.IfcProperties[0]))=="01","Qualified source must distinguish sets");
+        Assert(IfcParameterMapping.Read(row,"Length")=="125 mm","Preserve IFC units");
+        Assert(IfcParameterMapping.Read(row,"Missing")==null,"Missing source must not clear target");
+        bool ambiguous=false;try {IfcParameterMapping.Read(row,"Code");}catch(InvalidOperationException){ambiguous=true;}
+        Assert(ambiguous,"Ambiguous source names must fail");
+        var window=new IFCInfoWindow {AirTerminals=new List<AirTerminalRow>{row},CheckParameterTarget=n=>"Missing"};
+        var tabs=Descendants(window).OfType<TabControl>().Single(t=>t.Name=="WorkflowTabs");
+        var panel=tabs.Items.Cast<TabItem>().Single(t=>Equals(t.Header,"Parameters")).Content;
+        var mappings=(System.Collections.IList)panel.GetType().GetField("mappings",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(panel);
+        var validate=panel.GetType().GetMethod("Validate",BindingFlags.NonPublic|BindingFlags.Instance);
+        var mapping=new IfcParameterMapping {Source="Length",Target="IFC Length"};mappings.Add(mapping);
+        var request=new DuctRequest {Items=new List<DuctPlanItem>{new DuctPlanItem {Source=row}}};
+        Assert(!(bool)validate.Invoke(panel,new object[]{request}),"Missing target requires create choice");
+        mapping.CreateMissing=true;mapping.IsMapped=true;
+        Assert((bool)validate.Invoke(panel,new object[]{request})&&request.ParameterMappings.Count==1,"Create choice enters request");
+        mappings.Add(new IfcParameterMapping {Source="Length",Target="IFC Length",CreateMissing=true,IsMapped=true});
+        Assert(!(bool)validate.Invoke(panel,new object[]{request}),"Duplicate targets block creation");
+        mappings.RemoveAt(mappings.Count-1);
+        mapping.Source="Code";
+        Assert(!mapping.IsMapped,"Changing a choice must require mapping again");
+        Assert(!(bool)validate.Invoke(panel,new object[]{request}),"Unconfirmed rows must not silently transfer");
+        row.IsSelected=false;
+        panel.GetType().GetMethod("Refresh",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(panel,null);
+        var choices=(System.Collections.IList)panel.GetType().GetField("sourceChoices",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(panel);
+        Assert(choices.Count==3,"Catalog must load without selecting ducts for creation");
+        var grid=(DataGrid)panel.GetType().GetField("grid",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(panel);
+        Assert(grid.Columns.Count==3 && grid.Columns.All(c=>c is DataGridTemplateColumn),"Parameter table must have two choice columns and a mapping button");
+        mappings.Clear();row.DuctExistence="Already exists";
+        window.CheckParameterTarget=n=>"Ready";
+        var existingMapping=new IfcParameterMapping {Source="Length",Target="IFC Length"};mappings.Add(existingMapping);
+        panel.GetType().GetMethod("Map",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(panel,new object[]{existingMapping});
+        Assert(existingMapping.IsMapped,"Mapping button must confirm a valid existing parameter");
+        bool transferred=false;
+        window.TransferParameters=(rows,maps)=> {transferred=rows.Count==1&&rows[0]==row&&maps.Count==1&&maps[0].Target=="IFC Length";return "Transferred";};
+        typeof(IFCInfoWindow).GetField("parameterSelection",BindingFlags.NonPublic|BindingFlags.Instance).SetValue(window,new List<AirTerminalRow>{row});
+        panel.GetType().GetMethod("TransferExisting",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(panel,null);
+        Assert(transferred&&!row.CanSelect&&!row.IsSelected,"Existing ducts must transfer independently of creation checkboxes");
+        transferred=false;existingMapping.Target="Changed";
+        panel.GetType().GetMethod("TransferExisting",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(panel,null);
+        Assert(!transferred,"Changing target must block transfer until mapped again");
+        window.Close();
+    }
 
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
@@ -35,7 +83,7 @@ internal static class Program
         {
             if (args.Length == 1 && args[0] == "--test")
             {
-                TestSelection(false);
+                TestParameterMapping(); TestSelection(false);
                 TestSelection(true);
                 TestResultSelection();
                 TestFamilyLoader();
@@ -70,6 +118,18 @@ internal static class Program
             var tabEditor=Settings(tabItems,false,Choices());
             tabPreview.OpenDuctSettings(tabEditor,r=>{});
             Render(tabPreview,output,"duct-settings-tabs.png",1500,850);
+            tabPreview.AirTerminals[0].IfcProperties=new List<IfcPropertyValue> {
+                new IfcPropertyValue {Scope="Instance",SetName="Pset_DuctSegmentCommon",Name="Reference",Value="D-001"},
+                new IfcPropertyValue {Scope="Instance",SetName="Dimensions",Name="Width",Value="500",Unit="mm"}};
+            tabPreview.LoadParameterTargets=()=>new List<string>{"IFC Reference","IFC Width"};
+            tabPreview.CheckParameterTarget=n=>"Ready";
+            ((TabItem)previewTabs.Items[3]).IsSelected=true;
+            var parameterBody=((TabItem)previewTabs.Items[3]).Content;
+            var previewMappings=(System.Collections.IList)parameterBody.GetType().GetField("mappings",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(parameterBody);
+            previewMappings.Clear();
+            previewMappings.Add(new IfcParameterMapping {Source=IfcParameterMapping.Key(tabPreview.AirTerminals[0].IfcProperties[0]),Target="IFC Reference",IsMapped=true});
+            previewMappings.Add(new IfcParameterMapping {Source=IfcParameterMapping.Key(tabPreview.AirTerminals[0].IfcProperties[1]),Target="IFC Width"});
+            Render(tabPreview,output,"parameters.png",1500,850);
             tabPreview.Close();tabEditor.Close();
             var sourceWindow = new IFCInfoWindow();
             Render(sourceWindow, output, "ifc-source.png", 1100, 790);
@@ -328,10 +388,12 @@ internal static class Program
         var grids=Descendants(page).OfType<DataGrid>().ToList();
         var source=grids.Single(g=>g.Name!="IfcPropertyValues");
         var headers=source.Columns.Select(c=>c.Header as string).ToList();
+        Assert(source.Columns.Single(c=>(c.Header as string)=="Duct comparison").MinWidth>=150,"Comparison status must not collapse into vertical text");
         Assert(headers.Contains("System Type") && headers.Contains("System Name") && headers.Contains("Shape"),
             "Step 2 must show source systems and section shape");
         source.SelectedItem=row;
         var buttons=Descendants(main).OfType<Button>().Concat(Descendants(page).OfType<Button>()).Distinct().ToList();
+        Assert(!buttons.Any(b=>(b.ToolTip as string)=="Select all" || (b.ToolTip as string)=="Clear selection"),"Header checkbox replaces redundant selection buttons");
         var zoom=buttons.Single(b=>(b.ToolTip as string)=="Zoom to IFC source");
         Assert(zoom.IsEnabled,"Selecting a source row must enable IFC zoom review");
         zoom.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -607,6 +669,8 @@ internal static class Program
                 Assert(groups.All(g=>ReferenceEquals(Descendants(g).OfType<ComboBox>().Single(x=>x.Name=="GroupSystemType").SelectedItem,common.SelectedItem)),"Shared HVAC selection applies to every group");
                 var strategy=Descendants(window).OfType<ComboBox>().Single(x=>x.Name=="AutoSystemStrategy");
                 strategy.SelectedIndex=1;
+                Assert(groups.Where(g=>!ReferenceEquals(g,newGroup)).All(g=>Descendants(g).OfType<ComboBox>().Single(x=>x.Name=="GroupSystemType").SelectedItem!=null),"IFC mapping reuses existing names even without classification metadata");
+                Assert(Descendants(newGroup).OfType<CheckBox>().Single(x=>x.Name=="CreateNewSystem").IsChecked==true,"Only a missing system is planned for creation");
                 Assert(groups.All(g=>!Descendants(g).OfType<CheckBox>().Single(x=>x.Name=="CreateNewSystem").IsEnabled),"IFC auto mapping locks new-system controls");
                 Assert(Descendants(newGroup).OfType<ComboBox>().Single(x=>x.Name=="SystemClassification").SelectedItem.ToString()=="ExhaustAir","IFC auto mapping uses source classification");
                 mode.SelectedIndex=0;
@@ -694,3 +758,5 @@ internal static class Program
         using (var stream = File.Create(Path.Combine(output, name))) encoder.Save(stream);
     }
 }
+
+

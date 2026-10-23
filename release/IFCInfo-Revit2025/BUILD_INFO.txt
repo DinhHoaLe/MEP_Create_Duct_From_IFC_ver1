@@ -1,6 +1,6 @@
 Revit 2025 build
-API file version: 25.4.60.9
-Target framework: net8.0-windows
+API file version: 25.5.0.57
+Target framework: net10.0-windows
 Load IFCInfo_Revit2025.dll using a compatible Add-in Manager.
 Command: IFCInfo.IFCInfoCommand
 Build success does not certify live model transactions.

@@ -19,6 +19,7 @@ namespace IFCInfo
         private void SubmitDuctRequest(DuctRequest request)
         {
             if(creationBusy)return;
+            if(!parameterPanel.Validate(request)){workflowTabs.SelectedItem=parametersTab;return;}
             DuctCreationRequest=request;
             if(RunDuctCreation==null){Close();return;}
             creationBusy=true;
@@ -32,7 +33,12 @@ namespace IFCInfo
             }
         }
         private TabControl workflowTabs;
-        private TabItem sourceTab, elementsTab, settingsTab;
+        private TabItem sourceTab, elementsTab, settingsTab, parametersTab;
+        private ParameterMappingPanel parameterPanel;
+        public Func<string,string> CheckParameterTarget {get;set;}
+        public Func<List<string>> LoadParameterTargets {get;set;}
+        public Func<List<AirTerminalRow>,List<IfcParameterMapping>,string> TransferParameters {get;set;}
+        private List<AirTerminalRow> parameterSelection=new List<AirTerminalRow>();
         private string settingsSelection;
         private DuctCreationWindow embeddedSettings;
         private string SelectionKey() => string.Join("|",AirTerminals.Where(r=>r.IsSelected && r.CanSelect).Select(r=>r.ElementId).OrderBy(id=>id));
@@ -263,18 +269,27 @@ namespace IFCInfo
             settingsTab=new TabItem {Header="Duct Settings",IsEnabled=false,Padding=new Thickness(20,10,20,10)};
             UiDesign.StyleWorkflowTabs(workflowTabs);
             workflowTabs.Items.Add(sourceTab);workflowTabs.Items.Add(elementsTab);workflowTabs.Items.Add(settingsTab);
+            parameterPanel=new ParameterMappingPanel {Sources=()=>AirTerminals,
+                SelectedSources=()=>parameterSelection.Where(r=>AirTerminals.Contains(r)).ToList(),
+                Targets=()=>LoadParameterTargets?.Invoke()??new List<string>(),
+                Transfer=(rows,maps)=>TransferParameters?.Invoke(rows,maps)??"Transfer unavailable for this category.",
+                CheckTarget=name=>CheckParameterTarget?.Invoke(name)??"Catalog unavailable"};
+            parametersTab=new TabItem {Header="Parameters",Content=parameterPanel};
+            workflowTabs.Items.Add(parametersTab);
             root.Children.Add(workflowTabs);
             workflowTabs.SelectionChanged+=(s,e)=>
             {
                 if(e.Source!=workflowTabs)return;
+                bool parameters=workflowTabs.SelectedItem==parametersTab;
+                if(parameters)parameterPanel.Refresh();
                 bool source=workflowTabs.SelectedItem==sourceTab;
                 bool settings=workflowTabs.SelectedItem==settingsTab;
                 footer.Visibility=settings?Visibility.Collapsed:Visibility.Visible;
                 next.Visibility=source?Visibility.Visible:Visibility.Collapsed;
                 back.Visibility=source||settings?Visibility.Collapsed:Visibility.Visible;
                 create.Visibility=!source&&!settings&&(CanCreateDucts||CanReplaceCategory)?Visibility.Visible:Visibility.Collapsed;
-                heading.Text=source?"Select link and category":settings?"Duct settings":SelectedCategory?.Name??"Elements";
-                subtitle.Text=source?"Select an IFC source":settings?"Configure selected ducts":"Review IFC elements";
+                heading.Text=parameters?"Parameters":source?"Select link and category":settings?"Duct settings":SelectedCategory?.Name??"Elements";
+                subtitle.Text=parameters?"Map IFC properties and transfer values":source?"Select an IFC source":settings?"Configure selected ducts":"Review IFC elements";
                 progress.Content=UiDesign.Steps(source?1:settings?3:2);
                 if(settings && (settingsTab.Content==null || settingsSelection!=SelectionKey()))
                 {
@@ -312,6 +327,8 @@ namespace IFCInfo
                 LoadCategory = null;
                 LoadPreview = null;
                 PrepareDucts = null;
+                parameterSelection.Clear();
+                TransferParameters=null; LoadParameterTargets=null; CheckParameterTarget=null;
                 CanCreateDucts = false;
                 CanReplaceCategory = false;
                 if (SelectedLink == null)
@@ -478,6 +495,8 @@ namespace IFCInfo
             if (CanCreateDucts)
             {
                 var statusStyle = new Style(typeof(TextBlock), cellText);
+                statusStyle.Setters.Add(new Setter(TextBlock.TextWrappingProperty, TextWrapping.NoWrap));
+                statusStyle.Setters.Add(new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis));
                 statusStyle.Setters.Add(new Setter(TextBlock.FontWeightProperty, FontWeights.SemiBold));
                 statusStyle.Setters.Add(new Setter(TextBlock.ForegroundProperty, Brush("#9A6A16")));
                 statusStyle.Setters.Add(new Setter(TextBlock.ToolTipProperty, new System.Windows.Data.Binding("DuctExistenceDetail")));
@@ -496,7 +515,8 @@ namespace IFCInfo
                 table.Columns.Add(new DataGridTextColumn
                 {
                     Header = "Duct comparison",
-                    Width = new DataGridLength(150,DataGridLengthUnitType.Star),
+                    Width = new DataGridLength(160),
+                    MinWidth = 150,
                     IsReadOnly = true,
                     Binding = new System.Windows.Data.Binding("DuctExistence"),
                     ElementStyle = statusStyle
@@ -520,9 +540,11 @@ namespace IFCInfo
                 });
             }
             focusedSource=null; zoomSource.IsEnabled=false;
+            parameterSelection.Clear();
             IfcObjectViewer previewViewer=null;
             Action updateFocusedSource=()=>
             {
+                parameterSelection=table.SelectedItems.Cast<AirTerminalRow>().ToList();
                 var selectedRows=AirTerminals.Where(r=>r.IsSelected)
                     .Concat(table.SelectedItems.Cast<AirTerminalRow>()).Distinct().ToList();
                 focusedSource=selectedRows.Count==1 ? selectedRows[0] : null;
@@ -653,23 +675,17 @@ namespace IFCInfo
             panel.Children.Add(details);
             var summary = new DockPanel { Margin=new Thickness(0,0,0,8),LastChildFill=true };
             var selectionButtons=new StackPanel { Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right };
-            var selectAll=IconButton("Select all",
-                "M3,3 L21,3 21,21 3,21 Z M7,12 L10,15 17,8");
-            var selectNone=IconButton("Clear selection",
-                "M3,3 L21,3 21,21 3,21 Z M7,12 L17,12");
             var filter=IconButton("Filter elements",
                 "M3,4 L21,4 14,12 14,19 10,21 10,12 Z");
             var sort=IconButton("Sort elements",
                 "M4,6 L14,6 M4,12 L11,12 M4,18 L8,18 M18,5 L18,19 M14,15 L18,19 22,15");
             filter.Name="FilterSources"; sort.Name="SortSources";
-            foreach(var button in new[] { filter,sort,selectAll,selectNone })
+            foreach(var button in new[] { filter,sort })
             {
                 button.HorizontalContentAlignment=HorizontalAlignment.Center;
                 button.VerticalContentAlignment=VerticalAlignment.Center;
                 selectionButtons.Children.Add(button);
             }
-            selectAll.Click+=(s,e)=> { foreach(var row in sourceView.Cast<AirTerminalRow>().ToList()) row.IsSelected=row.CanSelect; };
-            selectNone.Click+=(s,e)=> { foreach(var row in AirTerminals) row.IsSelected=false; };
             DockPanel.SetDock(selectionButtons,Dock.Right); summary.Children.Add(selectionButtons);
             var search = new TextBox
             {
@@ -927,6 +943,7 @@ namespace IFCInfo
         }
     }
 }
+
 
 
 

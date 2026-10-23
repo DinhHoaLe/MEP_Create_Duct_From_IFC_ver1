@@ -13,6 +13,7 @@ namespace IFCInfo
         private readonly TextBox name;
         private readonly ComboBox template, classification;
         private readonly string sourceSystem;
+        private readonly TextBlock mappingStatus;
         private bool projectOnly, previousCreateNew;
         private object previousSystem;
         internal string Key { get; }
@@ -42,6 +43,10 @@ namespace IFCInfo
             TypeBox.SelectedItem = types.FirstOrDefault(x => x.Id == savedType) ?? (types.Count == 1 ? types[0] : null);
             if (types.Count == 0) body.Children.Add(IFCInfoWindow.Text("No duct type supports this profile. Load a matching type, then reopen the tool.", 12, "#9A5B12"));
             systemPanel=new StackPanel(); body.Children.Add(systemPanel);
+            mappingStatus=IFCInfoWindow.Text("",13,"#6F6044");
+            mappingStatus.Margin=new Thickness(0,12,0,0);
+            mappingStatus.Visibility=Visibility.Collapsed;
+            body.Children.Add(mappingStatus);
             SystemBox = UiDesign.Field(systemPanel, "Target system type", "Assign a separate Revit system to this group", "Select system type…", true);
             SystemBox.ItemsSource = systems;
             SystemBox.Name = "GroupSystemType";
@@ -95,6 +100,7 @@ namespace IFCInfo
                 manualName=name.Text; manualTemplate=template.SelectedItem; manualClassification=classification.SelectedItem; manualFollow=followIfc.IsChecked==true;
             }
             automatic=auto;
+            mappingStatus.Visibility=auto ? Visibility.Visible : Visibility.Collapsed;
             if(!auto) {
                 systemPanel.IsEnabled=true;
                 SystemBox.SelectedItem=manualSystem;createNew.IsChecked=manualNew;
@@ -103,12 +109,15 @@ namespace IFCInfo
                 return;
             }
             if(mapIfc) {
-                var match=SystemBox.Items.Cast<DuctChoice>().FirstOrDefault(x=>string.Equals(x.Name.Trim(),(sourceSystem??"").Trim(),StringComparison.OrdinalIgnoreCase)
-                    && inferredClassification!=null && x.Classification==inferredClassification);
+                var match=SystemBox.Items.Cast<DuctChoice>().FirstOrDefault(x=>string.Equals(x.Name.Trim(),(sourceSystem??"").Trim(),StringComparison.OrdinalIgnoreCase));
                 SystemBox.SelectedItem=match;createNew.IsChecked=match==null;
                 name.Text=sourceSystem=="No information"?"":sourceSystem??"";
                 followIfc.IsChecked=true;template.SelectedIndex=0;classification.SelectedItem=inferredClassification;
-            } else {createNew.IsChecked=false;SystemBox.SelectedItem=common;}
+                mappingStatus.Text=match!=null
+                    ? "Existing system found: " + match.Name + " · " + match.Classification + ". This group will use it directly."
+                    : "No matching system found. A new system named '" + name.Text + "' will be created on Create Ducts."
+                        + (inferredClassification==null ? " Select Manual to specify its classification first." : " Classification: " + inferredClassification + ".");
+            } else {createNew.IsChecked=false;SystemBox.SelectedItem=common;mappingStatus.Text=common==null ? "Select an existing HVAC system." : "Use existing system: " + common.Name;}
             systemPanel.IsEnabled=false;
         }
         internal void FollowProjectSystems(bool enabled)

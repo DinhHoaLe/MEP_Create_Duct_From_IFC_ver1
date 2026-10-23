@@ -23,6 +23,8 @@ namespace IFCInfo
         public string Name { get; set; }
         public string Value { get; set; }
         public string Unit { get; set; }
+        // Only populated for IFC length-typed values; normalized using explicit or project units.
+        public double? LengthMm { get; set; }
         public override string ToString() => Scope + " | " + SetName + "." + Name + " = " + Value + (string.IsNullOrEmpty(Unit) ? "" : " [" + Unit + "]");
     }
 }

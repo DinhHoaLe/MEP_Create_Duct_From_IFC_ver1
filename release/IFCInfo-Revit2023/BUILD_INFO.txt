@@ -1,5 +1,5 @@
-Revit 2023 build
-API file version: 23.0.11.19
+﻿Revit 2023 build
+API file version: 23.1.70.22
 Target framework: net48
 Load IFCInfo_Revit2023.dll using a compatible Add-in Manager.
 Command: IFCInfo.IFCInfoCommand

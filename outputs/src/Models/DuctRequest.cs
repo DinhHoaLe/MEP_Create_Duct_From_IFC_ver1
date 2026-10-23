@@ -10,6 +10,7 @@ namespace IFCInfo
         public static string SystemKey(string shape, string sourceType) => shape + "|" + (sourceType ?? "");
         public static string ShapeLabel(string shape) => shape == "Round" ? "Round" : shape == "Square" ? "Square" : shape == "Oval" ? "Oval" : shape == "Rectangular" ? "Rectangular" : "Unknown";
         public List<DuctPlanItem> Items;
+        public List<IfcParameterMapping> ParameterMappings = new List<IfcParameterMapping>();
         public long RoundTypeId, RectangularTypeId;
         public Dictionary<string, long> SystemTypes = new Dictionary<string, long>();
         public Dictionary<string, long> DuctTypes = new Dictionary<string, long>();
@@ -27,4 +28,5 @@ namespace IFCInfo
         public string Classification;
     }
 }
+
 
