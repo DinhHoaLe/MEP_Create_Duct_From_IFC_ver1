@@ -14,6 +14,23 @@ namespace IFCInfo
     {
         public static void Configure(IFCInfoWindow window, Document doc, RevitLinkInstance link)
         {
+            window.ProjectParameters=()=> {
+                var result=new List<ParameterOption>();var it=doc.ParameterBindings.ForwardIterator();
+                while(it.MoveNext()) {
+                    var binding=it.Current as ElementBinding;
+                    result.Add(new ParameterOption {Name=it.Key.Name,Id=it.Key.GetDataType().TypeId,DataKind=DuctParameterMapping.Kind(it.Key.GetDataType()),
+                        Discipline=DuctParameterMapping.SpecLabel(it.Key.GetDataType()),Binding=it.Current is InstanceBinding?"Instance":"Type",
+                        Categories=binding==null?"":string.Join(", ",binding.Categories.Cast<Category>().Select(c=>c.Name).OrderBy(x=>x))});
+                }
+                return result.Concat(DuctParameterMapping.BuiltInComments()).OrderBy(x=>x.Name).ToList();
+            };
+            window.ParameterTypes=()=>SpecUtils.GetAllSpecs().Select(id=>new ParameterOption {Id=id.TypeId,Name=LabelUtils.GetLabelForSpec(id),Discipline=UnitUtils.IsMeasurableSpec(id)?LabelUtils.GetLabelForDiscipline(UnitUtils.GetDiscipline(id)):"Common"}).OrderBy(x=>x.Name).ToList();
+            window.ParameterGroups=()=>ParameterUtils.GetAllBuiltInGroups().Select(id=>new ParameterOption{Id=id.TypeId,Name=LabelUtils.GetLabelForGroup(id)}).OrderBy(x=>x.Name).ToList();
+            window.CreateParameter=(name,type,group,binding)=> {
+                if(string.IsNullOrWhiteSpace(name) || name.IndexOfAny(new[]{(char)92,'/',':','{','}','[',']','|',';','<','>','?'})>=0)throw new InvalidOperationException("Enter a valid parameter name.");
+                if(DuctParameterMapping.Check(doc,name)!="Missing")throw new InvalidOperationException("This parameter name already exists or is not available.");
+                DuctCreation.RunTransaction(doc,"IFC - Create Text parameter",()=>DuctParameterMapping.Ensure(doc,new List<IfcParameterMapping>{new IfcParameterMapping{Target=name,CreateMissing=true,ParameterType=type,ParameterGroup=group,ParameterBinding=binding}}));
+            };
             window.CheckParameterTarget=name=>DuctParameterMapping.Check(doc,name);
             window.LoadParameterTargets=()=>DuctParameterMapping.Targets(doc);
             window.TransferParameters=(rows,maps)=>DuctParameterMapping.Transfer(doc,link,rows,maps);
@@ -90,8 +107,29 @@ namespace IFCInfo
                     DuctProjectSettings.Load(doc), updating,
                     types.Where(t => t.Shape == ConnectorProfileType.Oval).Select(t => new DuctChoice { Id = t.Id.Number(), Name = t.Name }).ToList());
                 }
-                var systemSnapshot=ProjectSystemBrowser.Read(doc);
-                dialog.BrowseSystems=owner=>ProjectSystemBrowser.Show(owner,systemSnapshot);
+                dialog.IfcSources=window.AirTerminals;
+                dialog.CreateSystemType=(name,templateId,classificationName,abbreviation)=> {
+                    if(string.IsNullOrWhiteSpace(name))throw new InvalidOperationException("Enter a system type name.");
+                    if(new FilteredElementCollector(doc).OfClass(typeof(MechanicalSystemType)).Cast<MechanicalSystemType>().Any(t=>string.Equals(t.Name,name,StringComparison.OrdinalIgnoreCase)))throw new InvalidOperationException("A system type with this name already exists.");
+                    MechanicalSystemType created=null;
+                    DuctCreation.RunTransaction(doc,"IFC - Create System Type",()=> {
+                        if(templateId>0)created=((MechanicalSystemType)doc.GetElement(ElementIds.Create(templateId))).Duplicate(name) as MechanicalSystemType;
+                        else {
+                            MEPSystemClassification classification;
+                            if(!Enum.TryParse(classificationName,out classification) || !new[]{MEPSystemClassification.SupplyAir,MEPSystemClassification.ReturnAir,MEPSystemClassification.ExhaustAir,MEPSystemClassification.OtherAir}.Contains(classification))throw new InvalidOperationException("Select a valid HVAC classification.");
+                            created=MechanicalSystemType.Create(doc,classification,name);
+                        }
+                    if(!string.IsNullOrWhiteSpace(abbreviation)){var parameter=created.get_Parameter(BuiltInParameter.RBS_SYSTEM_ABBREVIATION_PARAM);if(parameter==null || parameter.IsReadOnly || !parameter.Set(abbreviation))throw new InvalidOperationException("Cannot write system abbreviation.");}
+                    });
+                    return new DuctChoice{Id=created.Id.Number(),Name=created.Name,Classification=created.SystemClassification.ToString()};
+                };
+                dialog.CreateDuctType=(name,templateId)=> {
+                    if(string.IsNullOrWhiteSpace(name))throw new InvalidOperationException("Enter a duct type name.");
+                    if(new FilteredElementCollector(doc).OfClass(typeof(DuctType)).Cast<DuctType>().Any(t=>string.Equals(t.Name,name,StringComparison.OrdinalIgnoreCase)))throw new InvalidOperationException("A duct type with this name already exists.");
+                    long id=0;DuctCreation.RunTransaction(doc,"IFC - Create Duct Type",()=>id=((DuctType)doc.GetElement(ElementIds.Create(templateId))).Duplicate(name).Id.Number());return id;
+                };
+
+                dialog.BrowseSystems=owner=>ProjectSystemBrowser.Show(owner,ProjectSystemBrowser.Read(doc));
                 window.OpenDuctSettings(dialog,request=>
                 {
                     foreach(var skipped in request.Skipped)

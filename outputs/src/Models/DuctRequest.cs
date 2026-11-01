@@ -14,6 +14,7 @@ namespace IFCInfo
         public long RoundTypeId, RectangularTypeId;
         public Dictionary<string, long> SystemTypes = new Dictionary<string, long>();
         public Dictionary<string, long> DuctTypes = new Dictionary<string, long>();
+        public Dictionary<string, NewDuctSystem> NewDuctTypes = new Dictionary<string, NewDuctSystem>();
         public Dictionary<string, NewDuctSystem> NewSystems = new Dictionary<string, NewDuctSystem>();
         public Dictionary<string, long> Levels = new Dictionary<string, long>();
         public Dictionary<string, long> Worksets = new Dictionary<string, long>();

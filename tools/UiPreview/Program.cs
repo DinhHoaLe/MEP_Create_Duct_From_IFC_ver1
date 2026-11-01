@@ -18,6 +18,10 @@ internal static class Program
     private static int checks;
     private static void TestParameterMapping()
     {
+        var suggest=typeof(IFCInfoWindow).Assembly.GetType("IFCInfo.ParameterMappingPanel").GetMethod("SuggestedType",BindingFlags.Static|BindingFlags.NonPublic);
+        Assert((string)suggest.Invoke(null,new object[]{"IFCLENGTHMEASURE"})=="length","IFC length suggests Revit length");
+        Assert((string)suggest.Invoke(null,new object[]{"IFCVOLUMETRICFLOWRATEMEASURE"})=="airFlow","IFC flow suggests Revit air flow");
+        Assert((string)suggest.Invoke(null,new object[]{"IFC identifier (Text)"})=="text","IFC GUID suggests Text");
         var row=new AirTerminalRow {IsSelected=true,IfcProperties=new List<IfcPropertyValue> {
             new IfcPropertyValue {Scope="Instance",SetName="A",Name="Code",Value="01"},
             new IfcPropertyValue {Scope="Instance",SetName="B",Name="Code",Value="02"},
@@ -46,22 +50,70 @@ internal static class Program
         row.IsSelected=false;
         panel.GetType().GetMethod("Refresh",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(panel,null);
         var choices=(System.Collections.IList)panel.GetType().GetField("sourceChoices",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(panel);
-        Assert(choices.Count==3,"Catalog must load without selecting ducts for creation");
+        Assert(choices.Count==0,"Parameter catalog excludes unchecked sources");
+        row.IsSelected=true;panel.GetType().GetMethod("Refresh",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(panel,null);
+        Assert(choices.Count==5,"Parameter catalog includes GUID and element ID");
+        var creation=(Window)panel.GetType().GetMethod("BuildParameterDialog",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(panel,null);
+        var mode=Descendants(creation).OfType<ComboBox>().Single(c=>c.Name=="ParameterCreationMode");
+        var createSource=Descendants(creation).OfType<ComboBox>().Single(c=>c.Name=="CreationIfcProperty");
+        var createType=Descendants(creation).OfType<ComboBox>().Single(c=>c.Name=="CreatedParameterType");
+        var createName=Descendants(creation).OfType<TextBox>().Single(c=>c.Name=="CreatedParameterName");
+        Assert(mode.SelectedIndex==0 && createType.IsEnabled && !createName.IsReadOnly,"Manual creation permits name and type edits");
+        mode.SelectedIndex=1;createSource.SelectedItem="IFC GUID";
+        Assert(createName.Text=="IFC GUID" && createName.IsReadOnly && !createType.IsEnabled && ((ParameterOption)createType.SelectedItem).Id=="Text","Follow IFC locks inferred GUID name and Text type");
+        createSource.SelectedItem="IFC Element ID";
+        Assert(((ParameterOption)createType.SelectedItem).Id=="Integer","Follow IFC refreshes type when source changes");
+        mode.SelectedIndex=0;
+        Assert(createType.IsEnabled && !createName.IsReadOnly,"Switching to Manual unlocks inferred settings");
+        var binding=Descendants(creation).OfType<ComboBox>().Single(c=>c.Name=="CreatedParameterBinding");
+        Assert(binding.SelectedItem as string=="Instance" && binding.Items.Count==2,"Parameter creation offers Instance and Type");
+        binding.SelectedItem="Type";
+        Assert(binding.IsEnabled && Descendants(creation).OfType<TextBlock>().Any(t=>t.Text.Contains("existing ducts")),"Type binding remains editable and explains shared type effects");
+        creation.Close();
         var grid=(DataGrid)panel.GetType().GetField("grid",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(panel);
-        Assert(grid.Columns.Count==3 && grid.Columns.All(c=>c is DataGridTemplateColumn),"Parameter table must have two choice columns and a mapping button");
-        mappings.Clear();row.DuctExistence="Already exists";
-        window.CheckParameterTarget=n=>"Ready";
-        var existingMapping=new IfcParameterMapping {Source="Length",Target="IFC Length"};mappings.Add(existingMapping);
-        panel.GetType().GetMethod("Map",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(panel,new object[]{existingMapping});
-        Assert(existingMapping.IsMapped,"Mapping button must confirm a valid existing parameter");
-        bool transferred=false;
-        window.TransferParameters=(rows,maps)=> {transferred=rows.Count==1&&rows[0]==row&&maps.Count==1&&maps[0].Target=="IFC Length";return "Transferred";};
-        typeof(IFCInfoWindow).GetField("parameterSelection",BindingFlags.NonPublic|BindingFlags.Instance).SetValue(window,new List<AirTerminalRow>{row});
-        panel.GetType().GetMethod("TransferExisting",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(panel,null);
-        Assert(transferred&&!row.CanSelect&&!row.IsSelected,"Existing ducts must transfer independently of creation checkboxes");
-        transferred=false;existingMapping.Target="Changed";
-        panel.GetType().GetMethod("TransferExisting",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(panel,null);
-        Assert(!transferred,"Changing target must block transfer until mapped again");
+        Assert(grid.Columns.Count==5 && grid.Columns.OfType<DataGridTemplateColumn>().Count()==3,"Parameter table must have two choice columns and a mapping button");
+        mappings.Clear();
+        var firstPair=new IfcParameterMapping {Source="Length",Target="First"};mappings.Add(firstPair);
+        var duplicatePair=new IfcParameterMapping();mappings.Add(duplicatePair);
+        duplicatePair.Source="Length";Assert(duplicatePair.Source==null,"Duplicate IFC source is rejected immediately");
+        var available=panel.GetType().GetMethod("AvailableChoices",BindingFlags.NonPublic|BindingFlags.Instance);
+        var sourceOptions=(List<string>)available.Invoke(panel,new object[]{duplicatePair,"Source",new[]{"Length","IFC GUID"}});
+        Assert(!sourceOptions.Contains("Length") && sourceOptions.Contains("IFC GUID"),"Used IFC sources disappear from other rows");
+        var targetOptions=(List<string>)available.Invoke(panel,new object[]{duplicatePair,"Target",new[]{"First","Distance parameter"}});
+        Assert(!targetOptions.Contains("First") && targetOptions.Contains("Distance parameter"),"Used Revit targets are hidden while unused types remain visible");
+        duplicatePair.Source="IFC GUID";duplicatePair.Target="First";
+        Assert(duplicatePair.Target==null,"Duplicate Revit target is rejected immediately");
+        mappings.Clear();row.IfcGuid="test-guid";
+        var live=new IfcParameterMapping();mappings.Add(live);
+        live.Source="IFC GUID";live.CreateMissing=true;live.Target="Live Guid";live.CreateMissing=true;
+        var ready=panel.GetType().GetProperty("Ready",BindingFlags.NonPublic|BindingFlags.Instance);
+        Assert((bool)ready.GetValue(panel),"Completed pairs are ready without the removed Map button");
+        var status=(TextBlock)panel.GetType().GetField("status",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(panel);
+        Assert(status.Text.Contains("will be assigned"),"Status explains actual parameter assignment instead of stale zero mappings");
+        mappings.Clear();
+        mappings.Add(new IfcParameterMapping {Source="IFC GUID",Target="IFC Guid",CreateMissing=true});
+        mappings.Add(new IfcParameterMapping {Source="Length",Target="IFC Length",CreateMissing=true});
+        Assert((bool)validate.Invoke(panel,new object[]{request}) && request.ParameterMappings.Count==2,"One duct receives multiple selected parameter pairs without Map");
+        Assert(IfcParameterMapping.Read(row,"IFC GUID")=="test-guid","GUID is a built-in mapping source");
+        var second=new AirTerminalRow {ElementId="second",IfcGuid="second-guid",IsSelected=true,IfcProperties=new List<IfcPropertyValue>{new IfcPropertyValue{Name="Length",Value="250",Unit="mm"}}};
+        window.AirTerminals.Add(second);row.IsSelected=false;
+        panel.GetType().GetMethod("Refresh",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(panel,null);
+        var secondRequest=new DuctRequest {Items=new List<DuctPlanItem>{new DuctPlanItem{Source=second}}};
+        Assert((bool)validate.Invoke(panel,new object[]{secondRequest}) && secondRequest.ParameterMappings.Count==2 && secondRequest.ParameterMappings.All(m=>m.Applies(second)),"Existing parameter pairs follow changed Elements selection");
+        Assert(IfcParameterMapping.Read(second,"IFC GUID")=="second-guid" && IfcParameterMapping.Read(second,"Length")=="250 mm","Each selected duct retains its own IFC values");
+        mappings.Clear();window.CheckParameterTarget=n=>n=="Unavailable"?"Parameter is not bound to Ducts":"Ready";
+        window.ProjectParameters=()=>new List<ParameterOption>{
+          new ParameterOption{Name="ID Integer",DataKind="integer",Discipline="Integer"},
+          new ParameterOption{Name="ID Text",DataKind="text",Discipline="Text"},
+          new ParameterOption{Name="Distance",DataKind="length",Discipline="Length"},
+          new ParameterOption{Name="Unavailable",DataKind="integer",Discipline="Integer"}};
+        var typed=new IfcParameterMapping{Source="IFC Element ID"};mappings.Add(typed);
+        var filtered=(List<string>)available.Invoke(panel,new object[]{typed,"Target",new[]{"ID Integer","ID Text","Distance","Unavailable"}});
+        Assert(filtered.SequenceEqual(new[]{"ID Integer"}),"Integer IFC property offers only writable Integer targets");
+        typed.Target="ID Integer";typed.Source="IFC GUID";
+        Assert(typed.Target==null,"Changing IFC type clears incompatible selected target");
+        filtered=(List<string>)available.Invoke(panel,new object[]{typed,"Target",new[]{"ID Integer","ID Text","Distance"}});
+        Assert(filtered.SequenceEqual(new[]{"ID Text"}),"GUID offers Text targets and excludes numeric types");
         window.Close();
     }
 
@@ -114,7 +166,7 @@ internal static class Program
             foreach(var item in tabItems) item.Source.IsSelected=true;
             tabPreview.AirTerminals=tabItems.Select(i=>i.Source).ToList();
             var previewTabs=Descendants(tabPreview).OfType<TabControl>().Single(t=>t.Name=="WorkflowTabs");
-            ((TabItem)previewTabs.Items[2]).IsEnabled=true;
+            ((TabItem)previewTabs.Items[3]).IsEnabled=true;
             var tabEditor=Settings(tabItems,false,Choices());
             tabPreview.OpenDuctSettings(tabEditor,r=>{});
             Render(tabPreview,output,"duct-settings-tabs.png",1500,850);
@@ -123,8 +175,8 @@ internal static class Program
                 new IfcPropertyValue {Scope="Instance",SetName="Dimensions",Name="Width",Value="500",Unit="mm"}};
             tabPreview.LoadParameterTargets=()=>new List<string>{"IFC Reference","IFC Width"};
             tabPreview.CheckParameterTarget=n=>"Ready";
-            ((TabItem)previewTabs.Items[3]).IsSelected=true;
-            var parameterBody=((TabItem)previewTabs.Items[3]).Content;
+            ((TabItem)previewTabs.Items[2]).IsSelected=true;
+            var parameterBody=((TabItem)previewTabs.Items[2]).Content;
             var previewMappings=(System.Collections.IList)parameterBody.GetType().GetField("mappings",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(parameterBody);
             previewMappings.Clear();
             previewMappings.Add(new IfcParameterMapping {Source=IfcParameterMapping.Key(tabPreview.AirTerminals[0].IfcProperties[0]),Target="IFC Reference",IsMapped=true});
@@ -292,7 +344,13 @@ internal static class Program
                 Assert(main.AirTerminals[0].CanSelect==(currentRun==0),"Refreshed fully covered ducts must not be selectable again");
                 Assert(main.AirTerminals[1].CanSelect,"Another source must remain available for the next run");
                 main.AirTerminals[currentRun].IsSelected=true;
-                Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Duct settings →")
+                Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Next: Parameters →").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                main.CheckParameterTarget=n=>"Ready";
+                var resumeTabs=Descendants(main).OfType<TabControl>().Single(t=>t.Name=="WorkflowTabs");
+                var resumePanel=((TabItem)resumeTabs.Items[2]).Content;
+                var resumePairs=(System.Collections.IList)resumePanel.GetType().GetField("mappings",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(resumePanel);
+                resumePairs.Clear();resumePairs.Add(new IfcParameterMapping{Source="IFC Element ID",Target="Target"});
+                Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Next: Create Ducts →")
                     .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             }));
             main.ShowDialog();
@@ -516,14 +574,14 @@ internal static class Program
         main.AirTerminals=new List<AirTerminalRow> {source};
         var tabs=Descendants(main).OfType<TabControl>().Single(t=>t.Name=="WorkflowTabs");
         var elements=(TabItem)tabs.Items[1]; elements.IsEnabled=true;
-        var settingsTab=(TabItem)tabs.Items[2]; settingsTab.IsEnabled=true;
+        var settingsTab=(TabItem)tabs.Items[3]; settingsTab.IsEnabled=true;
         var editor=Settings(new List<DuctPlanItem> {Item("123",false,"Supply Air","Level 1")},false,Choices());
         main.OpenDuctSettings(editor,r=>{});
         Assert(tabs.SelectedItem==settingsTab && !editor.IsVisible,"Duct settings must be embedded without another visible window");
         var content=settingsTab.Content;
         var grid=Descendants((DependencyObject)content).OfType<DataGrid>().Single();
-        Assert(grid.Parent is Grid && Grid.GetRow(grid)==0 && Grid.GetColumn((Grid)grid.Parent)==1,"Include table must be fixed above right-side options");
-        Assert(double.IsNaN(grid.Height),"Include table must stretch vertically");
+        Assert(grid.Parent is Grid && Grid.GetRow(grid)==0 && Grid.GetColumn((Grid)grid.Parent)==0,"Include table must be fixed above right-side options");
+        Assert(grid.Visibility==Visibility.Collapsed,"Create Ducts does not show another element selection table");
         tabs.SelectedItem=elements; tabs.SelectedItem=settingsTab;
         Assert(ReferenceEquals(settingsTab.Content,content),"Tab switching must preserve unchanged settings");
         int prepared=0;
@@ -532,7 +590,26 @@ internal static class Program
         tabs.SelectedItem=elements;
         main.AirTerminals.Add(new AirTerminalRow {ElementId="456",IsSelected=true});
         tabs.SelectedItem=settingsTab;
-        Assert(prepared==1 && settingsTab.Content==null && tabs.SelectedItem==elements,"Changed selection must invalidate stale settings");
+        Assert(prepared==1 && !ReferenceEquals(settingsTab.Content,content) && tabs.SelectedItem==settingsTab,"Changed selection must invalidate stale settings");
+        tabs.SelectedItem=tabs.Items[2];
+        var parameterPanel=((TabItem)tabs.Items[2]).Content;
+        var pairs=(System.Collections.IList)parameterPanel.GetType().GetField("mappings",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(parameterPanel);
+        pairs.Add(new IfcParameterMapping{Source="IFC GUID"});
+        DuctCreationWindow preparedWindow=null;
+        main.PrepareDucts=rows=> {
+            preparedWindow=Settings(new List<DuctPlanItem>{Item("456",false,"Supply Air","Level 1")},false,Choices());
+            main.OpenDuctSettings(preparedWindow,r=>{});return null;
+        };
+        Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Next: Create Ducts →").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Assert(tabs.SelectedItem==tabs.Items[2] && preparedWindow==null,"Next remains in Parameters when the target is missing");
+        main.CheckParameterTarget=n=>"Ready";
+        var required=(IfcParameterMapping)pairs[pairs.Count-1];required.Target="Target";required.Source="IFC Element ID";
+        Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Next: Create Ducts →").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(tabs.SelectedItem==settingsTab && preparedWindow!=null,"Next opens settings after both source and target are chosen");
+        required.Target=null;
+        bool executed=false;main.RunDuctCreation=()=>executed=true;
+        typeof(IFCInfoWindow).GetMethod("SubmitDuctRequest",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(main,new object[]{new DuctRequest{Items=new List<DuctPlanItem>{Item("456",false,"Supply Air","Level 1")}}});
+        Assert(!executed && tabs.SelectedItem==tabs.Items[2],"Actual creation returns to Parameters and blocks incomplete pairs");
         main.Close();editor.Close();
     }
     private static void TestExports()
@@ -616,6 +693,20 @@ internal static class Program
 
     private static void TestDuctGroups()
     {
+        var matcher=typeof(IFCInfoWindow).Assembly.GetType("IFCInfo.DuctGroupEditor").GetMethod("MatchIfcDuctType",BindingFlags.NonPublic|BindingFlags.Static);
+        var sourceType=new AirTerminalRow {Name="Round IFC",IfcProperties=new List<IfcPropertyValue>()};
+        var types=new List<DuctChoice>{new DuctChoice{Id=90,Name="Round IFC"},new DuctChoice{Id=91,Name="Other"}};
+        Assert(((DuctChoice)matcher.Invoke(null,new object[]{new[]{sourceType},types})).Id==90,"Auto resolves exact IFC duct type names");
+        sourceType.Name="Unmatched";
+        Assert(matcher.Invoke(null,new object[]{new[]{sourceType},types})==null,"Auto does not guess an unrelated duct type");
+        var groupType=typeof(IFCInfoWindow).Assembly.GetType("IFCInfo.DuctGroupEditor");
+        var sampleEditor=Activator.CreateInstance(groupType,BindingFlags.Instance|BindingFlags.NonPublic,null,
+            new object[]{"Round|Supply","Round","Supply",1,new List<DuctChoice>{types[0]},new List<DuctChoice>(),new DuctSettingsData(),true,new[]{sourceType}},null);
+        groupType.GetMethod("SetDuctMode",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(sampleEditor,new object[]{true,new[]{sourceType},null,true});
+        var planned=(NewDuctSystem)groupType.GetProperty("NewType",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(sampleEditor);
+        Assert(planned!=null && planned.Name=="Unmatched" && planned.TemplateId==90,"Allowed missing IFC duct type is planned from a compatible template");
+        groupType.GetMethod("SetDuctMode",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(sampleEditor,new object[]{true,new[]{sourceType},null,false});
+        Assert(groupType.GetProperty("NewType",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(sampleEditor)==null,"Disabling automatic type creation removes the plan");
         var round=Item("1",true,"Supply Air","L1");
         var square=Item("2",false,"Supply Air","L1"); square.Height=square.Width;
         var rect=Item("3",false,"Supply Air","L1");
@@ -661,19 +752,71 @@ internal static class Program
                 Descendants(newGroup).OfType<ComboBox>().Single(x=>x.Name=="SystemClassification").SelectedItem="ExhaustAir";
                 var mode=Descendants(window).OfType<ComboBox>().Single(x=>x.Name=="SystemSetupMode");
                 var common=Descendants(window).OfType<ComboBox>().Single(x=>x.Name=="SharedHvacSystem");
+                Assert(!Descendants(window).OfType<CheckBox>().Any(x=>x.Name=="AllowIfcSystemCreation" || x.Name=="AllowIfcDuctTypeCreation"),"IFC creation options do not add extra checkboxes");
+                Assert(((DuctChoice)common.Items[0]).Name.Contains("create missing system"),"System follow option explains missing system creation");
+                Assert(Descendants(window).OfType<Button>().Any(x=>x.Name=="CreateSystemType"),"System creation is available in the shared controls");
+                Exception systemDialogError=null;
+                window.Dispatcher.BeginInvoke(new Action(()=> {
+                    var child=window.OwnedWindows.Cast<Window>().Single(w=>w.Title=="Create System Type");
+                    try {
+                        var childMode=Descendants(child).OfType<ComboBox>().Single(c=>c.Name=="SystemCreationMode");
+                        childMode.SelectedIndex=1;
+                        var sourceSystem=Descendants(child).OfType<ComboBox>().Single(c=>c.Name=="IfcSystemSource");sourceSystem.SelectedIndex=0;
+                        var systemName=Descendants(child).OfType<TextBox>().Single(c=>c.Name=="NewSystemTypeName");
+                        Assert(systemName.IsReadOnly && systemName.Text==(string)sourceSystem.SelectedItem,"Follow IFC system selection fills and locks name");
+                        childMode.SelectedIndex=0;
+                        Assert(!systemName.IsReadOnly,"Manual system creation permits edits");
+                        var classBox=Descendants(child).OfType<ComboBox>().Single(c=>c.Name=="NewSystemClassification");
+                        var templateBox=Descendants(child).OfType<ComboBox>().Single(c=>c.Name=="NewSystemTemplate");
+                        templateBox.SelectedIndex=1;classBox.SelectedItem="OtherAir";
+                        Assert(classBox.IsEnabled && ((DuctChoice)templateBox.SelectedItem).Id==0,"Manual classification changes reset an incompatible template");
+                        Assert(Descendants(child).OfType<TextBox>().Any(t=>t.Name=="NewSystemAbbreviation"),"System creation includes abbreviation input");
+                    } catch(Exception ex){systemDialogError=ex;} finally{child.Close();}
+                }),DispatcherPriority.ApplicationIdle);
+                Descendants(window).OfType<Button>().Single(x=>x.Name=="CreateSystemType").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                if(systemDialogError!=null)throw systemDialogError;
+                window.IfcSources=new List<AirTerminalRow>{new AirTerminalRow{Name="IFC Round Type",NativeShape="Round"}};
+                Exception ductDialogError=null;
+                window.Dispatcher.BeginInvoke(new Action(()=> {
+                    var child=window.OwnedWindows.Cast<Window>().Single(w=>w.Title=="Create Duct Type");
+                    try {
+                        var profile=Descendants(child).OfType<ComboBox>().Single(c=>c.Name=="NewDuctProfile");
+                        Assert(profile.Items.Count==3,"Duct creation offers Rectangular Round Oval");
+                        var childMode=Descendants(child).OfType<ComboBox>().Single(c=>c.Name=="DuctTypeCreationMode");childMode.SelectedIndex=1;
+                        var source=Descendants(child).OfType<ComboBox>().Single(c=>c.Name=="IfcDuctTypeSource");source.SelectedIndex=0;
+                        var text=Descendants(child).OfType<TextBox>().Single(t=>t.Name=="NewDuctTypeName");
+                        Assert(text.Text=="IFC Round Type" && (string)profile.SelectedItem=="Round" && !profile.IsEnabled,"Follow IFC fills duct name and profile");
+                        childMode.SelectedIndex=0;
+                        Assert(!text.IsReadOnly && profile.IsEnabled,"Manual duct mode unlocks name and profile");
+                    }catch(Exception ex){ductDialogError=ex;}finally{child.Close();}
+                }),DispatcherPriority.ApplicationIdle);
+                Descendants(window).OfType<Button>().Single(x=>x.Name=="CreateDuctType").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                if(ductDialogError!=null)throw ductDialogError;
                 mode.SelectedIndex=1;
                 Assert(groups.All(g=>!Descendants(g).OfType<ComboBox>().Single(x=>x.Name=="GroupSystemType").IsEnabled),"Auto locks every group system");
+                var globalLevel=Descendants(window).OfType<ComboBox>().Single(c=>c.Name=="SharedLevel");
+                var groupLevels=Descendants(window).OfType<ComboBox>().Where(c=>c.Name=="GroupLevel").ToList();
+                Assert(globalLevel.IsEnabled && groupLevels.All(c=>!c.IsEnabled),"Auto level locks per-source controls and enables shared choice");
+                if(globalLevel.Items.Count>1) {
+                    globalLevel.SelectedIndex=1;long expected=((DuctChoice)globalLevel.SelectedItem).Id;
+                    Assert(groupLevels.All(c=>((DuctChoice)c.SelectedItem).Id==expected),"Shared level applies immediately to every source level");
+                    globalLevel.SelectedIndex=0;
+                }
+                Assert(groups.All(g=>Descendants(g).OfType<ComboBox>().Single(x=>x.Name=="GroupSystemFollowIfc").Visibility==Visibility.Visible),"Follow IFC system is shown explicitly in every group");
+                Assert(groups.All(g=>Descendants(g).OfType<ComboBox>().Single(x=>x.Name=="GroupDuctFollowIfc").Visibility==Visibility.Visible),"Follow IFC duct mode displays the resolved name rather than its template");
                 submit.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                Assert(window.Request==null,"Auto existing requires a shared type");
+                Assert(window.Request==null,"Auto blocks unmatched IFC duct types");
+                Assert(common.IsEnabled && groups.All(g=>!Descendants(g).OfType<ComboBox>().Single(x=>x.Name=="GroupDuctType").IsEnabled),"Auto locks shared system and duct type controls");
+                common.SelectedIndex=1;
+                Assert(groups.All(g=>((DuctChoice)Descendants(g).OfType<ComboBox>().Single(x=>x.Name=="GroupSystemType").SelectedItem).Id==((DuctChoice)common.SelectedItem).Id),"Auto project system choice applies immediately to every locked group");
                 common.SelectedIndex=0;
-                Assert(groups.All(g=>ReferenceEquals(Descendants(g).OfType<ComboBox>().Single(x=>x.Name=="GroupSystemType").SelectedItem,common.SelectedItem)),"Shared HVAC selection applies to every group");
-                var strategy=Descendants(window).OfType<ComboBox>().Single(x=>x.Name=="AutoSystemStrategy");
-                strategy.SelectedIndex=1;
                 Assert(groups.Where(g=>!ReferenceEquals(g,newGroup)).All(g=>Descendants(g).OfType<ComboBox>().Single(x=>x.Name=="GroupSystemType").SelectedItem!=null),"IFC mapping reuses existing names even without classification metadata");
                 Assert(Descendants(newGroup).OfType<CheckBox>().Single(x=>x.Name=="CreateNewSystem").IsChecked==true,"Only a missing system is planned for creation");
                 Assert(groups.All(g=>!Descendants(g).OfType<CheckBox>().Single(x=>x.Name=="CreateNewSystem").IsEnabled),"IFC auto mapping locks new-system controls");
                 Assert(Descendants(newGroup).OfType<ComboBox>().Single(x=>x.Name=="SystemClassification").SelectedItem.ToString()=="ExhaustAir","IFC auto mapping uses source classification");
                 mode.SelectedIndex=0;
+                Assert(!common.IsEnabled && groups.All(g=>Descendants(g).OfType<ComboBox>().Single(x=>x.Name=="GroupDuctType").IsEnabled),"Manual restores editable duct and system choices");
+                Assert(!globalLevel.IsEnabled && groupLevels.All(c=>c.IsEnabled),"Manual restores editable source levels");
                 var projectBox=Descendants(newGroup).OfType<ComboBox>().Single(x=>x.Name=="GroupSystemType");
                 Assert(Descendants(newGroup).OfType<CheckBox>().Single(x=>x.Name=="CreateNewSystem").IsChecked==true && projectBox.SelectedItem==null,"Manual restores prior configuration");
                 submit.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

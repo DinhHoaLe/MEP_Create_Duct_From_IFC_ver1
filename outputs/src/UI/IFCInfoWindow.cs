@@ -35,6 +35,9 @@ namespace IFCInfo
         private TabControl workflowTabs;
         private TabItem sourceTab, elementsTab, settingsTab, parametersTab;
         private ParameterMappingPanel parameterPanel;
+        public Func<List<ParameterOption>> ProjectParameters {get;set;}
+        public Func<List<ParameterOption>> ParameterTypes {get;set;} public Func<List<ParameterOption>> ParameterGroups {get;set;}
+        public Action<string,string,string,string> CreateParameter {get;set;}
         public Func<string,string> CheckParameterTarget {get;set;}
         public Func<List<string>> LoadParameterTargets {get;set;}
         public Func<List<AirTerminalRow>,List<IfcParameterMapping>,string> TransferParameters {get;set;}
@@ -50,12 +53,22 @@ namespace IFCInfo
             style.Setters.Add(new Setter(Control.PaddingProperty,new Thickness(0,8,0,8)));
             return style;
         }
+        private FrameworkElement EmptyDuctSettings()
+        {
+            var editor=new DuctCreationWindow(new List<DuctPlanItem>(),new List<string>(),
+                new List<DuctChoice>(),new List<DuctChoice>(),new List<DuctChoice>(),
+                new List<DuctChoice>(),new List<DuctChoice>(),new DuctSettingsData());
+            editor.BackEmbedded=()=>workflowTabs.SelectedItem=parametersTab;
+            editor.CloseEmbedded=()=>Close();
+            Closed+=(s,e)=>editor.Close();
+            return editor.DetachBody();
+        }
         public void OpenDuctSettings(DuctCreationWindow editor, Action<DuctRequest> completed)
         {
             if(embeddedSettings!=null) embeddedSettings.Close();
             embeddedSettings=editor;
             settingsSelection=SelectionKey();
-            editor.BackEmbedded=()=>workflowTabs.SelectedItem=elementsTab; editor.CloseEmbedded=()=>Close();
+            editor.BackEmbedded=()=>workflowTabs.SelectedItem=parametersTab; editor.CloseEmbedded=()=>Close();
             editor.SubmitEmbedded=request=> {completed(request);SubmitDuctRequest(request);};
             settingsTab.Content=editor.DetachBody();
             workflowTabs.SelectedItem=settingsTab;
@@ -160,7 +173,7 @@ namespace IFCInfo
         public IFCInfoWindow()
         {
             Title = "Create Duct from IFC";
-            Width = Math.Min(1500, SystemParameters.WorkArea.Width);
+            Width = Math.Min(1760, SystemParameters.WorkArea.Width);
             Height = 800;
             MinWidth = 640;
             MinHeight = 540;
@@ -196,7 +209,7 @@ namespace IFCInfo
             subtitle.Margin = new Thickness(0, 8, 0, 0);
             titles.Children.Add(heading);
             titles.Children.Add(subtitle);
-            var progress = new ContentControl { Content = UiDesign.Steps(1), Margin = new Thickness(20, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+            var progress = new ContentControl { Content = UiDesign.Steps(1,true), Margin = new Thickness(20, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(progress, 2);
             header.Children.Add(progress);
             header.SizeChanged += (s, e) => progress.Visibility = header.ActualWidth < 960 ? Visibility.Collapsed : Visibility.Visible;
@@ -265,17 +278,18 @@ namespace IFCInfo
             var scroll = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
             workflowTabs=new TabControl {Name="WorkflowTabs",Background=Background,BorderThickness=new Thickness(0),Margin=new Thickness(20,4,20,0)};
             sourceTab=new TabItem {Header="Source",Content=scroll,Padding=new Thickness(20,10,20,10)};
-            elementsTab=new TabItem {Header="Elements",IsEnabled=false,Padding=new Thickness(20,10,20,10)};
-            settingsTab=new TabItem {Header="Duct Settings",IsEnabled=false,Padding=new Thickness(20,10,20,10)};
+            elementsTab=new TabItem {Header="Elements",IsEnabled=true,Padding=new Thickness(20,10,20,10)};
+            settingsTab=new TabItem {Header="Create Ducts",IsEnabled=true,Padding=new Thickness(20,10,20,10)};
             UiDesign.StyleWorkflowTabs(workflowTabs);
-            workflowTabs.Items.Add(sourceTab);workflowTabs.Items.Add(elementsTab);workflowTabs.Items.Add(settingsTab);
-            parameterPanel=new ParameterMappingPanel {Sources=()=>AirTerminals,
+            workflowTabs.Items.Add(sourceTab);workflowTabs.Items.Add(elementsTab);
+            parameterPanel=new ParameterMappingPanel {Sources=()=>AirTerminals.Where(r=>r.IsSelected && r.CanSelect).ToList(),
                 SelectedSources=()=>parameterSelection.Where(r=>AirTerminals.Contains(r)).ToList(),
-                Targets=()=>LoadParameterTargets?.Invoke()??new List<string>(),
+                Targets=()=>LoadParameterTargets?.Invoke()??new List<string>(), Types=()=>ParameterTypes?.Invoke()??new List<ParameterOption>(), Groups=()=>ParameterGroups?.Invoke()??new List<ParameterOption>(), Catalog=()=>ProjectParameters?.Invoke()??new List<ParameterOption>(),
+                CreateParameter=(name,type,group,binding)=> {if(CreateParameter==null)throw new InvalidOperationException("Select an IFC source and Ducts category first.");CreateParameter(name,type,group,binding);},
                 Transfer=(rows,maps)=>TransferParameters?.Invoke(rows,maps)??"Transfer unavailable for this category.",
                 CheckTarget=name=>CheckParameterTarget?.Invoke(name)??"Catalog unavailable"};
             parametersTab=new TabItem {Header="Parameters",Content=parameterPanel};
-            workflowTabs.Items.Add(parametersTab);
+            workflowTabs.Items.Add(parametersTab);workflowTabs.Items.Add(settingsTab);
             root.Children.Add(workflowTabs);
             workflowTabs.SelectionChanged+=(s,e)=>
             {
@@ -287,15 +301,17 @@ namespace IFCInfo
                 footer.Visibility=settings?Visibility.Collapsed:Visibility.Visible;
                 next.Visibility=source?Visibility.Visible:Visibility.Collapsed;
                 back.Visibility=source||settings?Visibility.Collapsed:Visibility.Visible;
-                create.Visibility=!source&&!settings&&(CanCreateDucts||CanReplaceCategory)?Visibility.Visible:Visibility.Collapsed;
-                heading.Text=parameters?"Parameters":source?"Select link and category":settings?"Duct settings":SelectedCategory?.Name??"Elements";
-                subtitle.Text=parameters?"Map IFC properties and transfer values":source?"Select an IFC source":settings?"Configure selected ducts":"Review IFC elements";
-                progress.Content=UiDesign.Steps(source?1:settings?3:2);
-                if(settings && (settingsTab.Content==null || settingsSelection!=SelectionKey()))
+                create.Visibility=!source&&!settings?Visibility.Visible:Visibility.Collapsed;
+                create.Content=parameters?"Next: Create Ducts →":"Next: Parameters →";
+                heading.Text=parameters?"Parameters":source?"Select link and category":settings?"Create Ducts":SelectedCategory?.Name??"Elements";
+                subtitle.Text=parameters?"Choose properties for the checked IFC elements":source?"Select an IFC source":settings?"Configure selected ducts":"Review IFC elements";
+                progress.Content=UiDesign.Steps(source?1:settings?4:parameters?3:2,true,new[]{SelectedCategory!=null && AirTerminals.Count>0,AirTerminals.Any(r=>r.IsSelected && r.CanSelect),SelectedCategory!=null && parameterPanel.Ready,false});
+                if(workflowTabs.SelectedItem==elementsTab && elementsTab.Content==null) elementsTab.Content=new ScrollViewer {Content=CountPage(),VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
+                if(settings && (settingsTab.Content==null || settingsSelection!=SelectionKey() || embeddedSettings==null))
                 {
                     settingsTab.Content=null;
-                    create.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
-                    if(settingsTab.Content==null)workflowTabs.SelectedItem=elementsTab;
+                    if(CanCreateDucts && AirTerminals.Any(r=>r.IsSelected && r.CanSelect))create.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                    if(settingsTab.Content==null)settingsTab.Content=EmptyDuctSettings();
                 }
             };
             Loaded += (s, e) =>
@@ -316,8 +332,8 @@ namespace IFCInfo
                 next.IsEnabled = false;
                 categoryBox.ItemsSource = null;
                 categoryBox.IsEnabled = false;
-                elementsTab.Content=null; elementsTab.IsEnabled=false;
-                settingsTab.Content=null; settingsTab.IsEnabled=false;
+                elementsTab.Content=null; elementsTab.IsEnabled=true;
+                settingsTab.Content=null; settingsTab.IsEnabled=true;
                 SelectedLink = linkBox.SelectedItem as LinkOption;
                 SelectedCategory = null;
                 Replacement = null;
@@ -328,7 +344,7 @@ namespace IFCInfo
                 LoadPreview = null;
                 PrepareDucts = null;
                 parameterSelection.Clear();
-                TransferParameters=null; LoadParameterTargets=null; CheckParameterTarget=null;
+                TransferParameters=null; LoadParameterTargets=null; CheckParameterTarget=null;CreateParameter=null;
                 CanCreateDucts = false;
                 CanReplaceCategory = false;
                 if (SelectedLink == null)
@@ -349,7 +365,7 @@ namespace IFCInfo
             };
             categoryBox.SelectionChanged += (s, e) => {
                 next.IsEnabled = categoryBox.SelectedItem is CategoryOption;
-                elementsTab.Content=null;elementsTab.IsEnabled=false;settingsTab.Content=null;settingsTab.IsEnabled=false;
+                elementsTab.Content=null;elementsTab.IsEnabled=true;settingsTab.Content=null;settingsTab.IsEnabled=true;
             };
             next.Click += (s, e) =>
             {
@@ -363,32 +379,22 @@ namespace IFCInfo
                 }
                 catch (Exception ex) { feedback.Text = "Could not read category: " + ex.Message; return; }
                 heading.Text = SelectedCategory.Name;
-                progress.Content = UiDesign.Steps(2);
+                progress.Content = UiDesign.Steps(2,true);
                 subtitle.Text = "Step 2 · Select elements";
                 header.Margin = new Thickness(38, 24, 38, 4);
                 elementsTab.Content=new ScrollViewer {Content=CountPage(),VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
-                elementsTab.IsEnabled=true;settingsTab.Content=null;settingsTab.IsEnabled=CanCreateDucts;
+                elementsTab.IsEnabled=true;settingsTab.Content=null;settingsTab.IsEnabled=true;
                 workflowTabs.SelectedItem=elementsTab;
                 scroll.ScrollToTop();
                 next.Visibility = Visibility.Collapsed;
                 back.Visibility = Visibility.Visible;
                 zoomSource.Visibility=Visibility.Visible;
-                create.Content = CanCreateDucts ? "Duct settings →" : "Create family →";
+                create.Content = "Next: Parameters →";
                 create.Visibility = CanCreateDucts || CanReplaceCategory ? Visibility.Visible : Visibility.Collapsed;
                 feedback.Text = "";
             };
-            back.Click += (s, e) =>
-            {
-                header.Margin = new Thickness(28, 20, 28, 12);
-                heading.Text = "Select link and category";
-                subtitle.Text = "Step 1 · Select a source to continue";
-                progress.Content = UiDesign.Steps(1);
-                workflowTabs.SelectedItem=sourceTab;
-                scroll.ScrollToTop();
-                next.Visibility = Visibility.Visible;
-                back.Visibility = create.Visibility = Visibility.Collapsed;
-                zoomSource.Visibility=Visibility.Collapsed; zoomSource.IsEnabled=false; focusedSource=null;
-                feedback.Text = "Select an IFC link and category.";
+            back.Click += (s,e)=> {
+                workflowTabs.SelectedItem=workflowTabs.SelectedItem==parametersTab?elementsTab:sourceTab;
             };
             Action openPlacement = () =>
             {
@@ -415,6 +421,9 @@ namespace IFCInfo
             };
             create.Click += (s, e) =>
             {
+                if(workflowTabs.SelectedItem==elementsTab){if(!AirTerminals.Any(r=>r.IsSelected && r.CanSelect)){feedback.Text="Check at least one source element.";return;} workflowTabs.SelectedItem=parametersTab;return;}
+                if(SelectedCategory==null && !CanCreateDucts){workflowTabs.SelectedItem=settingsTab;return;}
+                if(workflowTabs.SelectedItem==parametersTab && !parameterPanel.ValidateNext()){feedback.Text="Missing or invalid Revit Parameter. Check Parameters.";return;}
                 if (!CanCreateDucts) { openPlacement(); return; }
                 var selected = AirTerminals.Where(row => row.IsSelected && row.CanSelect).ToList();
                 if (selected.Count == 0)
@@ -424,12 +433,14 @@ namespace IFCInfo
                 }
                 try
                 {
-                    if(settingsTab.Content!=null && settingsSelection==SelectionKey()) {workflowTabs.SelectedItem=settingsTab;return;}
-                    var request = PrepareDucts?.Invoke(selected);
+                    if(embeddedSettings!=null && settingsTab.Content!=null && settingsSelection==SelectionKey()) {workflowTabs.SelectedItem=settingsTab;return;}
+                    if(PrepareDucts==null){feedback.Text="Duct creation is unavailable. Reload the IFC link and Ducts category.";return;}
+                    var request = PrepareDucts.Invoke(selected);
                     if (request != null)
                     {
                         SubmitDuctRequest(request);
                     }
+                    else if(embeddedSettings==null)feedback.Text="No duct settings were prepared. Check the source selection.";
                 }
                 catch (Exception ex) { feedback.Text = "Could not prepare ducts: " + ex.Message; }
             };
@@ -489,7 +500,7 @@ namespace IFCInfo
             table.Columns.Add(new DataGridTemplateColumn
             {
                 Header = selectHeader, HeaderStyle = SelectionHeaderStyle(table.ColumnHeaderStyle),
-                Width = 60,
+                Width = 36,
                 CellTemplate = new DataTemplate { VisualTree = check }
             });
             if (CanCreateDucts)
@@ -535,7 +546,7 @@ namespace IFCInfo
                     IsReadOnly = true,
                     Binding = new System.Windows.Data.Binding(column.Property),
                     Width = new DataGridLength(column.Width,DataGridLengthUnitType.Star),
-                    MinWidth = column.Property == "Name" ? 160 : column.Property == "Shape" ? 100 : 120,
+                    MinWidth = column.Property == "Name" ? 100 : 65,
                     ElementStyle = cellText
                 });
             }
@@ -569,8 +580,8 @@ namespace IFCInfo
             };
             var details = new Grid();
             details.ColumnDefinitions.Add(new ColumnDefinition());
+            details.ColumnDefinitions.Add(new ColumnDefinition { Width=new GridLength(420) });
             details.ColumnDefinitions.Add(new ColumnDefinition { Width=new GridLength(350) });
-            details.ColumnDefinitions.Add(new ColumnDefinition { Width=new GridLength(380) });
             details.RowDefinitions.Add(new RowDefinition { Height=GridLength.Auto });
             details.RowDefinitions.Add(new RowDefinition { Height=GridLength.Auto });
             details.RowDefinitions.Add(new RowDefinition { Height=GridLength.Auto });
@@ -653,8 +664,8 @@ namespace IFCInfo
             {
                 bool stackProperties=details.ActualWidth<900;
                 bool stackViewer=details.ActualWidth<1250;
-                details.ColumnDefinitions[1].Width=stackProperties ? new GridLength(0) : new GridLength(350);
-                details.ColumnDefinitions[2].Width=stackViewer ? new GridLength(0) : new GridLength(380);
+                details.ColumnDefinitions[1].Width=stackProperties ? new GridLength(0) : new GridLength(420);
+                details.ColumnDefinitions[2].Width=stackViewer ? new GridLength(0) : new GridLength(350);
                 Grid.SetColumn(properties,stackProperties?0:1); Grid.SetRow(properties,stackProperties?3:1);
                 properties.Margin=stackProperties?new Thickness(0,0,0,0):new Thickness(12,0,0,0);
                 Grid.SetColumn(propertyToolbar,stackProperties?0:1);

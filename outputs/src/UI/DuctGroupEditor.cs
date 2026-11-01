@@ -8,7 +8,7 @@ namespace IFCInfo
 {
     internal sealed class DuctGroupEditor : Expander
     {
-        internal ComboBox TypeBox, SystemBox;
+        internal ComboBox TypeBox, SystemBox; private ComboBox ductFollowDisplay,systemFollowDisplay; private TextBlock newTypeNote;
         private readonly CheckBox createNew; private CheckBox followIfc; private StackPanel systemPanel; private string inferredClassification; private bool automatic; private object manualSystem, manualTemplate, manualClassification; private bool manualNew, manualFollow; private string manualName;
         private readonly TextBox name;
         private readonly ComboBox template, classification;
@@ -37,23 +37,25 @@ namespace IFCInfo
             Content = body;
             TypeBox = UiDesign.Field(body, "Duct Type", "Only matching profile types are shown · " + count + " segments", "Select duct type…", false);
             TypeBox.ItemsSource = types;
-            TypeBox.Name = "GroupDuctType";
+            TypeBox.Name = "GroupDuctType";ductFollowDisplay=FollowDisplay(TypeBox,"GroupDuctFollowIfc");
+            newTypeNote=IFCInfoWindow.Text("",12,"#9A5B12");body.Children.Add(newTypeNote);
             long savedType = saved.DuctTypes.FirstOrDefault(x => x.Key == key)?.Id ??
                 (shape == "Round" ? saved.RoundTypeId : shape == "Oval" ? 0 : saved.RectangularTypeId);
             TypeBox.SelectedItem = types.FirstOrDefault(x => x.Id == savedType) ?? (types.Count == 1 ? types[0] : null);
             if (types.Count == 0) body.Children.Add(IFCInfoWindow.Text("No duct type supports this profile. Load a matching type, then reopen the tool.", 12, "#9A5B12"));
+            body.Children.Add(new Border {Height=1,Background=IFCInfoWindow.Brush("#DDD6CE"),Margin=new Thickness(0,16,0,12)});
             systemPanel=new StackPanel(); body.Children.Add(systemPanel);
             mappingStatus=IFCInfoWindow.Text("",13,"#6F6044");
             mappingStatus.Margin=new Thickness(0,12,0,0);
             mappingStatus.Visibility=Visibility.Collapsed;
             body.Children.Add(mappingStatus);
-            SystemBox = UiDesign.Field(systemPanel, "Target system type", "Assign a separate Revit system to this group", "Select system type…", true);
+            SystemBox = UiDesign.Field(systemPanel, "System Type", "Assign a Revit system to this group", "Select system type…", true);
             SystemBox.ItemsSource = systems;
-            SystemBox.Name = "GroupSystemType";
+            SystemBox.Name = "GroupSystemType";systemFollowDisplay=FollowDisplay(SystemBox,"GroupSystemFollowIfc");
             long savedSystem = saved.Systems.FirstOrDefault(x => x.Key == key)?.Id ?? 0;
             SystemBox.SelectedItem = systems.FirstOrDefault(x => x.Id == savedSystem) ??
                 systems.FirstOrDefault(x => string.Equals(x.Name, sourceSystem, StringComparison.OrdinalIgnoreCase));
-            createNew = new CheckBox { Name = "CreateNewSystem", Content = "Create a new system type", Margin = new Thickness(0, 14, 0, 8) };
+            createNew = new CheckBox { Visibility=Visibility.Collapsed, Name = "CreateNewSystem", Content = "Create a new system type", Margin = new Thickness(0, 14, 0, 8) };
             systemPanel.Children.Add(createNew);
             var fields = new StackPanel { Visibility = Visibility.Collapsed };
             systemPanel.Children.Add(fields);
@@ -90,8 +92,65 @@ namespace IFCInfo
             createNew.Checked += (s, e) => { fields.Visibility = Visibility.Visible; SystemBox.IsEnabled = false; };
             createNew.Unchecked += (s, e) => { fields.Visibility = Visibility.Collapsed; SystemBox.IsEnabled = true; };
             fields.Children.Add(IFCInfoWindow.Text("Systems are created only when Create Ducts is clicked. Groups with the same name and classification share the new system.", 12, "#716B63"));
+            var ductField=(FrameworkElement)((FrameworkElement)TypeBox.Parent).Parent;
+            body.Children.Remove(ductField);body.Children.Remove(newTypeNote);
+            var divider=body.Children.OfType<Border>().FirstOrDefault();if(divider!=null)body.Children.Remove(divider);
+            body.Children.Add(new Border{Height=1,Background=IFCInfoWindow.Brush("#DDD6CE"),Margin=new Thickness(0,16,0,12)});
+            body.Children.Add(ductField);body.Children.Add(newTypeNote);
         }
 
+        private static ComboBox FollowDisplay(ComboBox original,string name)
+        {
+            var display=new ComboBox {Name=name,Style=original.Style,MinHeight=original.MinHeight,FontSize=original.FontSize,Padding=original.Padding,Foreground=original.Foreground,HorizontalContentAlignment=HorizontalAlignment.Stretch,IsEnabled=false,Visibility=Visibility.Collapsed};
+            ((Panel)original.Parent).Children.Add(display);
+            return display;
+        }
+        private static void ShowFollow(ComboBox original,ComboBox display,bool active,string value)
+        {
+            original.Visibility=active?Visibility.Collapsed:Visibility.Visible;
+            display.Visibility=active?Visibility.Visible:Visibility.Collapsed;
+            display.ItemsSource=new[]{"Follow IFC — "+value};display.SelectedIndex=0;display.ToolTip=value;
+        }
+        private bool autoDuct;private object manualDuct; internal NewDuctSystem NewType {get;private set;}
+        internal void AddSystemChoice(DuctChoice choice)
+        {
+            var previousChoice=SystemBox.SelectedItem;var previousTemplate=template.SelectedItem;
+            var systemChoices=SystemBox.Items.Cast<DuctChoice>().Where(x=>x.Id!=choice.Id).ToList();systemChoices.Add(choice);SystemBox.ItemsSource=systemChoices;
+            var templates=template.Items.Cast<DuctChoice>().Where(x=>x.Id!=choice.Id).ToList();templates.Add(choice);template.ItemsSource=templates;SystemBox.SelectedItem=previousChoice;template.SelectedItem=previousTemplate;
+        }
+        internal void SelectManualSystem(DuctChoice choice){createNew.IsChecked=false;SystemBox.SelectedItem=choice;}
+        internal void SetDuctMode(bool auto,IEnumerable<AirTerminalRow> sources,DuctChoice forced=null,bool allowNew=false)
+        {
+            NewType=null;newTypeNote.Text="";
+            if(auto && !autoDuct)manualDuct=TypeBox.SelectedItem;
+            if(!auto && autoDuct)TypeBox.SelectedItem=manualDuct;
+            autoDuct=auto;TypeBox.IsEnabled=!auto;
+            if(!auto){ShowFollow(TypeBox,ductFollowDisplay,false,"");return;}
+            TypeBox.SelectedItem=forced!=null?TypeBox.Items.Cast<DuctChoice>().FirstOrDefault(t=>t.Id==forced.Id):MatchIfcDuctType(sources,TypeBox.Items.Cast<DuctChoice>());
+            if(TypeBox.SelectedItem==null && allowNew) {
+                var names=sources.Select(r=>r.IfcProperties.FirstOrDefault(p=>p.Scope=="Type" && (p.Name=="Name" || p.Name=="Reference"))?.Value ?? r.DuctSource?.Name ?? r.Name).Where(n=>!string.IsNullOrWhiteSpace(n)).Select(n=>n.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                var template=manualDuct as DuctChoice ?? (TypeBox.Items.Count==1?TypeBox.Items[0] as DuctChoice:null);
+                if(names.Count==1 && template!=null) {
+                    NewType=new NewDuctSystem{Name=names[0],TemplateId=template.Id};
+                    TypeBox.SelectedItem=template;
+                }
+            }
+            newTypeNote.Text=NewType!=null?"Create IFC duct type: "+NewType.Name+" (from "+((DuctChoice)TypeBox.SelectedItem).Name+")":allowNew && TypeBox.SelectedItem==null?"Choose a compatible template in Manual before enabling Auto.":"";
+            ShowFollow(TypeBox,ductFollowDisplay,forced==null,NewType?.Name ?? (TypeBox.SelectedItem as DuctChoice)?.Name ?? "unresolved");
+            TypeBox.ToolTip=TypeBox.SelectedItem==null?"No unique IFC duct type match. Select Manual.":null;
+        }
+        internal static DuctChoice MatchIfcDuctType(IEnumerable<AirTerminalRow> sources,IEnumerable<DuctChoice> choices)
+        {
+            var available=choices.ToList();DuctChoice result=null;
+            foreach(var row in sources) {
+                var names=new List<string>{row.Name,row.DuctSource?.Name};
+                names.AddRange(row.IfcProperties.Where(p=>p.Scope=="Type" && (p.Name=="Name" || p.Name=="Reference" || p.Name=="Type Name")).Select(p=>p.Value));
+                var matches=available.Where(t=>names.Any(n=>!string.IsNullOrWhiteSpace(n) && string.Equals(n.Trim(),t.Name.Trim(),StringComparison.OrdinalIgnoreCase))).ToList();
+                if(matches.Count!=1 || (result!=null && result.Id!=matches[0].Id))return null;
+                result=matches[0];
+            }
+            return result;
+        }
         internal void SetSystemMode(bool auto, bool mapIfc, DuctChoice common)
         {
             if(!auto && !automatic)return;
@@ -100,6 +159,7 @@ namespace IFCInfo
                 manualName=name.Text; manualTemplate=template.SelectedItem; manualClassification=classification.SelectedItem; manualFollow=followIfc.IsChecked==true;
             }
             automatic=auto;
+            ShowFollow(SystemBox,systemFollowDisplay,auto && mapIfc,sourceSystem??"unresolved");
             mappingStatus.Visibility=auto ? Visibility.Visible : Visibility.Collapsed;
             if(!auto) {
                 systemPanel.IsEnabled=true;
@@ -142,6 +202,7 @@ namespace IFCInfo
             }
         }
 
+        internal bool AllowAutoSystemCreation {get;set;}=true;
         internal NewDuctSystem NewSystem => createNew.IsChecked == true ? new NewDuctSystem
         {
             Name = name.Text.Trim(), TemplateId = ((DuctChoice)template.SelectedItem).Id,
@@ -150,8 +211,9 @@ namespace IFCInfo
 
         internal string Validate()
         {
-            if (TypeBox.SelectedItem == null) return Label + ": select a duct type matching the profile.";
+            if (TypeBox.SelectedItem == null) return Label + (autoDuct?": no unique IFC duct type match. Select Manual.":": select a duct type matching the profile.");
             var proposed = NewSystem;
+            if(automatic && proposed!=null && !AllowAutoSystemCreation)return Label+": enable creation of missing IFC system types or select an existing system.";
             if (proposed == null) return SystemBox.SelectedItem == null ? Label + (projectOnly
                 ? ": no matching project system type. Select an existing type or disable Follow project system types."
                 : ": select a system type or create one.") : null;

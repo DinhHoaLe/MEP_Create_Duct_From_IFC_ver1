@@ -1,5 +1,5 @@
-﻿Revit 2024 build
-API file version: 24.3.50.51
+Revit 2024 build
+API file version: 24.3.60.12
 Target framework: net48
 Load IFCInfo_Revit2024.dll using a compatible Add-in Manager.
 Command: IFCInfo.IFCInfoCommand

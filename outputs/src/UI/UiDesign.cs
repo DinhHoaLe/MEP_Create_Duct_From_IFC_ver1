@@ -77,6 +77,13 @@ namespace IFCInfo
         {
             tabs.BorderThickness=new Thickness(0);
             tabs.Padding=new Thickness(0,12,0,0);
+            tabs.Template=(ControlTemplate)XamlReader.Parse(@"
+<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='TabControl'>
+ <Grid><Grid.RowDefinitions><RowDefinition Height='Auto'/><RowDefinition Height='*'/></Grid.RowDefinitions>
+ <StackPanel IsItemsHost='True' Orientation='Horizontal' HorizontalAlignment='Left'/>
+ <Border Grid.Row='1' Margin='0,12,0,0'><ContentPresenter ContentSource='SelectedContent'/></Border>
+ </Grid>
+</ControlTemplate>");
             tabs.ItemContainerStyle=(Style)XamlReader.Parse(@"
 <Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='TabItem'>
  <Setter Property='Foreground' Value='#716B63'/><Setter Property='Background' Value='#E8E2DA'/>
@@ -88,7 +95,7 @@ namespace IFCInfo
   </Border>
   <ControlTemplate.Triggers>
    <Trigger Property='IsSelected' Value='True'><Setter Property='Foreground' Value='#37322B'/><Setter Property='FontWeight' Value='SemiBold'/><Setter TargetName='surface' Property='Background' Value='White'/><Setter TargetName='surface' Property='BorderThickness' Value='1,1,1,0'/></Trigger>
-   <Trigger Property='IsMouseOver' Value='True'><Setter TargetName='surface' Property='Background' Value='#F5F2EE'/></Trigger>
+   <Trigger SourceName='surface' Property='IsMouseOver' Value='True'><Setter TargetName='surface' Property='Background' Value='#F5F2EE'/></Trigger>
    <Trigger Property='IsEnabled' Value='False'><Setter Property='Opacity' Value='.5'/></Trigger>
   </ControlTemplate.Triggers>
  </ControlTemplate></Setter.Value></Setter>
@@ -194,16 +201,17 @@ namespace IFCInfo
             tile.Child = path;
             return tile;
         }
-        internal static FrameworkElement Steps(int active)
+        internal static FrameworkElement Steps(int active, bool fourSteps=false, bool[] ready=null)
         {
-            var grid = new Grid { Width = 340, VerticalAlignment = VerticalAlignment.Center };
-            for (int i = 0; i < 5; i++)
+            var grid = new Grid { Width = fourSteps?450:340, VerticalAlignment = VerticalAlignment.Center };
+            for (int i = 0; i < (fourSteps?7:5); i++)
                 grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(i % 2 == 0 ? 90 : 35) });
             var labels = new[] { "Select link\nand category", "Select elements\nand type", "Create and finish" };
-            for (int i = 0; i < 3; i++)
+            if(fourSteps)labels=new[]{"Source","Elements","Parameters","Create\nDucts"};
+            for (int i = 0; i < labels.Length; i++)
             {
                 bool current = i + 1 == active;
-                bool done = i + 1 < active;
+                bool done = ready!=null ? i<ready.Length && ready[i] && !current : !fourSteps && i + 1 < active;
                 var panel = new StackPanel();
                 var number = new Border
                 {
@@ -226,7 +234,7 @@ namespace IFCInfo
                 panel.Children.Add(number);
                 panel.Children.Add(new TextBlock
                 {
-                    Text = labels[i],
+                    Text = labels[i], TextWrapping=TextWrapping.Wrap,
                     TextAlignment = TextAlignment.Center,
                     FontSize = 12,
                     Margin = new Thickness(0, 8, 0, 0),
@@ -235,7 +243,7 @@ namespace IFCInfo
                 });
                 Grid.SetColumn(panel, i * 2);
                 grid.Children.Add(panel);
-                if (i < 2)
+                if (i < labels.Length-1)
                 {
                     var line = new Border
                     {

@@ -95,8 +95,6 @@ namespace IFCInfo
                                 if (placed==null) throw new InvalidOperationException("Revit did not return a new element.");
                                 if (placed.Category?.Id!=type.Category?.Id) throw new InvalidOperationException("The resulting category does not match the selected type.");
                                 SaveTracking(placed,key,row); IfcPropertyStorage.Save(placed,row);
-                                var comments=placed.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
-                                if (comments!=null && !comments.IsReadOnly) comments.Set("IFC GUID: "+row.IfcGuid+" | System Name: "+row.SystemName+" | System Type: "+row.SystemType);
                                 if (placed is Duct duct)
                                 {
                                     DuctCreation.RecordSource(duct,key,row,request.SystemTypeId);

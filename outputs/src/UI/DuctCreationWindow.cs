@@ -11,6 +11,9 @@ namespace IFCInfo
         private DockPanel embeddedBody;
         private FrameworkElement embeddedHeader;
         public Action<DuctRequest> SubmitEmbedded { get; set; }
+        public List<AirTerminalRow> IfcSources {get;set;}
+        public Func<string,long,string,string,DuctChoice> CreateSystemType {get;set;}
+        public Func<string,long,long> CreateDuctType {get;set;}
         public Action<Window> BrowseSystems {get;set;}
         public Action BackEmbedded { get; set; } public Action CloseEmbedded { get; set; }
         public FrameworkElement DetachBody()
@@ -69,51 +72,108 @@ namespace IFCInfo
             DockPanel.SetDock(header,Dock.Top); root.Children.Add(header);
             var body = new StackPanel();
             var workspace=new Grid();
-            workspace.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(1,GridUnitType.Star)});
-            workspace.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(500),MinWidth=400});
+            workspace.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(420)});
+            workspace.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(1,GridUnitType.Star),MinWidth=400});
             root.Children.Add(workspace);
             var groupsBody=new StackPanel();
-            workspace.Children.Add(new ScrollViewer {Content=groupsBody,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Padding=new Thickness(0,0,14,0)});
-            var sidebar=new Grid {Margin=new Thickness(14,0,0,0)};
-            sidebar.RowDefinitions.Add(new RowDefinition {Height=new GridLength(1,GridUnitType.Star),MinHeight=140});
+            var groupScroll=new ScrollViewer {Content=groupsBody,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Padding=new Thickness(14,0,0,0)};Grid.SetColumn(groupScroll,1);workspace.Children.Add(groupScroll);
+            var sidebar=new Grid {Margin=new Thickness(0,0,14,0)};
+            sidebar.RowDefinitions.Add(new RowDefinition {Height=new GridLength(0),MinHeight=0});
             sidebar.RowDefinitions.Add(new RowDefinition {Height=GridLength.Auto});
             sidebar.RowDefinitions.Add(new RowDefinition {Height=new GridLength(1.35,GridUnitType.Star),MinHeight=170});
-            Grid.SetColumn(sidebar,1);workspace.Children.Add(sidebar);
+            Grid.SetColumn(sidebar,0);workspace.Children.Add(sidebar);
             var separator=new Border {Height=1,Background=IFCInfoWindow.Brush("#D1C8BF"),Margin=new Thickness(0,14,0,14)};
-            Grid.SetRow(separator,1);sidebar.Children.Add(separator);
+            Grid.SetRow(separator,1);separator.Visibility=Visibility.Collapsed;sidebar.Children.Add(separator);
             var optionsScroll=new ScrollViewer {Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Padding=new Thickness(0,0,8,0)};
-            Grid.SetRow(optionsScroll,2);sidebar.Children.Add(optionsScroll);
-            body.Children.Add(IFCInfoWindow.Text("LEVEL & GENERAL OPTIONS", 16, "#37322B"));
-            groupsBody.Children.Add(IFCInfoWindow.Text("MAP BY SHAPE × SYSTEM TYPE", 18, "#37322B"));
-            groupsBody.Children.Add(IFCInfoWindow.Text("Each group has its own duct type and system type. Expand a group to configure it; uncheck unwanted sources in the fixed table on the right.",13,"#716B63"));
-            var summary = new Border { Background = IFCInfoWindow.Brush("#E8E2DA"), CornerRadius = new CornerRadius(10), Padding = new Thickness(18,12,18,12), Margin = new Thickness(0,0,0,16) };
+            Grid.SetRow(optionsScroll,0);Grid.SetRowSpan(optionsScroll,3);sidebar.Children.Add(optionsScroll);
+
+
+
+            var summary = new Border { Padding = new Thickness(0,0,0,0), Margin = new Thickness(0,0,0,16) };
             summary.Child = IFCInfoWindow.Text((updating ? "Changes: " : "Ready to create: ") + items.Count + " segments     ·     Skipped  " + issues.Count + " segments", 16, "#6F6044");
             groupsBody.Children.Add(summary);
             var editors = new Dictionary<string, DuctGroupEditor>();
-            var mode=UiDesign.Field(body,"System setup","Auto applies to every group in this run; Manual edits each group.","Select mode",false);
+            var mode=UiDesign.Field(body,"Setup mode","","Select mode",false,true);
             mode.Name="SystemSetupMode";mode.ItemsSource=new[]{"Manual","Auto"};mode.SelectedIndex=0;
-            var autoOptions=new StackPanel {Visibility=Visibility.Collapsed};body.Children.Add(autoOptions);
-            var autoMode=UiDesign.Field(autoOptions,"Auto strategy","Use one existing HVAC type, or map source IFC system names and classifications.","Select strategy",false);
-            autoMode.Name="AutoSystemStrategy";autoMode.ItemsSource=new[]{"Use existing HVAC","Map IFC systems"};autoMode.SelectedIndex=0;
-            var sharedOptions=new StackPanel {Visibility=Visibility.Collapsed};body.Children.Add(sharedOptions);
-            var commonSystem=UiDesign.Field(sharedOptions,"Shared HVAC system type","Apply this Revit type to all groups.","Select HVAC system type",true);
-            commonSystem.Name="SharedHvacSystem";commonSystem.ItemsSource=systems;
+            Action<string> section=label=> {body.Children.Add(new Border {Height=1,Background=IFCInfoWindow.Brush("#DDD6CE"),Margin=new Thickness(0,16,0,12)});body.Children.Add(IFCInfoWindow.Text(label,16,"#37322B"));};
+            section("System");
+            var commonSystem=UiDesign.Field(body,"System type","","Optional: apply to all groups",true,true);
+            var followIfcChoice=new DuctChoice{Id=0,Name="Follow IFC — create missing system types"};
+            commonSystem.Name="SharedHvacSystem";commonSystem.ItemsSource=new[]{followIfcChoice}.Concat(systems).ToList();commonSystem.SelectedItem=followIfcChoice;
             var projectStatus=IFCInfoWindow.Text("",12,"#9A5B12");body.Children.Add(projectStatus);
-            Action refreshProjectStatus=()=> {
-                projectStatus.Text=mode.SelectedIndex==0?"Manual: configure the system in each group."
-                    :autoMode.SelectedIndex==0?(commonSystem.SelectedItem==null?"Select one existing HVAC system type.":"All group system controls are locked to the shared type.")
-                    :"IFC mapping checks project system names first (ignoring case and surrounding spaces). Existing names are assigned directly using their Revit classification; missing names create new types on Create. New types with unresolved classifications require Manual.";
-            };
+            var followIfcDuctChoice=new DuctChoice{Id=0,Name="Follow IFC — create missing duct types"};
+            ComboBox sharedTypes=null;
+            Action refreshProjectStatus=()=>projectStatus.Text=mode.SelectedIndex==1?"Follow IFC reuses matches and creates missing types using compatible templates.":"";
             Action applyMode=()=> {
                 bool auto=mode.SelectedIndex==1;
-                autoOptions.Visibility=auto?Visibility.Visible:Visibility.Collapsed;
-                sharedOptions.Visibility=auto && autoMode.SelectedIndex==0?Visibility.Visible:Visibility.Collapsed;
-                foreach(var editor in editors.Values)editor.SetSystemMode(auto,autoMode.SelectedIndex==1,commonSystem.SelectedItem as DuctChoice);
+                commonSystem.IsEnabled=auto;
+                if(sharedTypes!=null)sharedTypes.IsEnabled=auto && sharedTypes.Items.Count>0;
+
+                foreach(var pair in editors) {
+                    pair.Value.AllowAutoSystemCreation=true;
+                    var selectedSystem=commonSystem.SelectedItem as DuctChoice;
+                    pair.Value.SetSystemMode(auto,selectedSystem==null || selectedSystem.Id==0,selectedSystem);
+                    var selectedType=sharedTypes?.SelectedItem as DuctChoice;
+                    pair.Value.SetDuctMode(auto,items.Where(i=>i.GroupKey==pair.Key).Select(i=>i.Source),selectedType?.Id>0?selectedType:null,true);
+                }
                 refreshProjectStatus();
             };
             mode.SelectionChanged+=(s,e)=>applyMode();
-            autoMode.SelectionChanged+=(s,e)=>applyMode();
+
             commonSystem.SelectionChanged+=(s,e)=>applyMode();
+            var newSystem=IFCInfoWindow.Button("Create a new system type…",false);newSystem.Name="CreateSystemType";body.Children.Add(newSystem);
+            newSystem.Click+=(s,e)=> {
+                var dialog=new Window{Title="Create System Type",Width=560,Height=640,Owner=Window.GetWindow(root),WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=UiDesign.Background};
+                var content=new StackPanel{Margin=new Thickness(24)};
+                var creationMode=UiDesign.Field(content,"Creation mode","","Select mode",false,true);creationMode.Name="SystemCreationMode";creationMode.ItemsSource=new[]{"Manual","Follow IFC"};creationMode.SelectedIndex=0;
+                var sourcePanel=new StackPanel{Visibility=Visibility.Collapsed};content.Children.Add(sourcePanel);
+                var ifcSystem=UiDesign.Field(sourcePanel,"IFC system","","Select IFC system",false,true);ifcSystem.Name="IfcSystemSource";
+                var sourceRows=IfcSources??items.Select(i=>i.Source).ToList();
+                ifcSystem.ItemsSource=sourceRows.Select(r=>r.SystemType).Where(n=>!string.IsNullOrWhiteSpace(n) && n!="No information").Distinct().OrderBy(n=>n).ToList();
+                content.Children.Add(new TextBlock{Text="Name"});var name=new TextBox{Name="NewSystemTypeName",Padding=new Thickness(8)};content.Children.Add(name);
+                var template=UiDesign.Field(content,"Template","","Select template",false,true);
+                template.ItemsSource=new[]{new DuctChoice{Id=0,Name="Create from classification"}}.Concat(systems).ToList();template.SelectedIndex=0;
+                var classification=UiDesign.Field(content,"System classification","","Select classification",false,true);classification.Name="NewSystemClassification";classification.ItemsSource=new[]{"SupplyAir","ReturnAir","ExhaustAir","OtherAir"};
+                bool syncingClassification=false;
+                template.Name="NewSystemTemplate";
+                template.SelectionChanged+=(a,b)=> {
+                    var chosen=template.SelectedItem as DuctChoice;
+                    if(chosen?.Id>0){syncingClassification=true;classification.SelectedItem=chosen.Classification;syncingClassification=false;}
+                };
+                classification.SelectionChanged+=(a,b)=> {
+                    if(syncingClassification || creationMode.SelectedIndex!=0)return;
+                    var chosen=template.SelectedItem as DuctChoice;
+                    if(chosen?.Id>0 && chosen.Classification!=classification.SelectedItem as string)template.SelectedIndex=0;
+                };
+                content.Children.Add(new TextBlock{Text="System abbreviation",Margin=new Thickness(0,10,0,4)});
+                var abbreviation=new TextBox{Name="NewSystemAbbreviation",Padding=new Thickness(8)};content.Children.Add(abbreviation);
+                var message=new TextBlock{TextWrapping=TextWrapping.Wrap};content.Children.Add(message);
+                Action followSource=()=> {
+                    bool auto=creationMode.SelectedIndex==1;sourcePanel.Visibility=auto?Visibility.Visible:Visibility.Collapsed;
+                    name.IsReadOnly=auto;template.IsEnabled=!auto;classification.IsEnabled=!auto;message.Text="";
+                    if(!auto)return;
+                    name.Text=ifcSystem.SelectedItem as string??"";
+                    string evidence;var inferred=IfcHvacClassification.Resolve(sourceRows.Where(r=>r.SystemType==name.Text),out evidence);
+                    var match=systems.FirstOrDefault(t=>string.Equals(t.Name,name.Text,StringComparison.OrdinalIgnoreCase));
+                    template.SelectedItem=template.Items.Cast<DuctChoice>().FirstOrDefault(t=>t.Id==(match?.Id??0));
+                    classification.SelectedItem=match?.Classification??inferred;classification.IsEnabled=false;
+                    if(classification.SelectedItem==null)message.Text="IFC classification is missing or conflicting. Select Manual.";
+                };
+                creationMode.SelectionChanged+=(a,b)=>followSource();ifcSystem.SelectionChanged+=(a,b)=>followSource();
+                var add=IFCInfoWindow.Button("Create",true);content.Children.Add(add);
+                add.Click+=(a,b)=> {try {
+                    if(CreateSystemType==null)throw new InvalidOperationException("Connect to a Revit project first.");
+                    var chosen=(DuctChoice)template.SelectedItem;
+                    if(chosen.Id==0 && classification.SelectedItem==null)throw new InvalidOperationException("Select a system classification.");
+                    var created=CreateSystemType(name.Text.Trim(),chosen.Id,classification.SelectedItem as string,abbreviation.Text.Trim());
+                    systems.Add(created);
+                    foreach(var editor in editors.Values)editor.AddSystemChoice(created);
+                    commonSystem.ItemsSource=new[]{followIfcChoice}.Concat(systems).ToList();commonSystem.SelectedItem=created;
+                    if(mode.SelectedIndex==0)foreach(var editor in editors.Values)editor.SelectManualSystem(created);
+                    dialog.Close();
+                }catch(Exception ex){message.Text=ex.Message;}};
+                UiDesign.SetContent(dialog,new ScrollViewer{Content=content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto});dialog.ShowDialog();
+            };
             var groupSearch = new TextBox { MinHeight=34, Padding=new Thickness(8), Margin=new Thickness(0,12,0,12), ToolTip="Search groups by shape or system type" };
             groupsBody.Children.Add(IFCInfoWindow.Text("Find shape / system type groups",12,"#716B63"));
             groupsBody.Children.Add(groupSearch);
@@ -132,22 +192,108 @@ namespace IFCInfo
                 editor.SystemBox.SelectionChanged += (s,e) => refreshProjectStatus();
                 groupsBody.Children.Add(editor);
             }
+            section("Duct Type");
+            sharedTypes=UiDesign.Field(body,"Duct type","","Optional: apply to all groups",false,true);
+            sharedTypes.Name="SharedDuctType";
+
+            Action refreshTypes=()=> {
+                var selectedGroups=items.Where(i=>i.Include).Select(i=>i.GroupKey).Distinct().ToList();
+                var available=selectedGroups.Count==0?new List<DuctChoice>():editors[selectedGroups[0]].TypeBox.Items.Cast<DuctChoice>().ToList();
+                foreach(var key in selectedGroups.Skip(1))available=available.Where(t=>editors[key].TypeBox.Items.Cast<DuctChoice>().Any(x=>x.Id==t.Id)).ToList();
+                available.Insert(0,followIfcDuctChoice);var previous=sharedTypes.SelectedItem as DuctChoice;sharedTypes.ItemsSource=available;
+                sharedTypes.SelectedItem=available.FirstOrDefault(x=>x.Id==previous?.Id)??followIfcDuctChoice;
+                sharedTypes.IsEnabled=mode.SelectedIndex==1;
+            };
+            sharedTypes.SelectionChanged+=(s,e)=>applyMode();
+            var newDuct=IFCInfoWindow.Button("Create a new duct type…",false);body.Children.Add(newDuct);
+            newDuct.Name="CreateDuctType";
+            newDuct.Click+=(s,e)=> {
+                var dialog=new Window{Title="Create Duct Type",Width=560,Height=640,Owner=Window.GetWindow(root),WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=UiDesign.Background};
+                var content=new StackPanel{Margin=new Thickness(24)};
+                var creationMode=UiDesign.Field(content,"Creation mode","","Select mode",false,true);creationMode.Name="DuctTypeCreationMode";creationMode.ItemsSource=new[]{"Manual","Follow IFC"};creationMode.SelectedIndex=0;
+                var sourcePanel=new StackPanel{Visibility=Visibility.Collapsed};content.Children.Add(sourcePanel);
+                var ifcType=UiDesign.Field(sourcePanel,"IFC duct type","","Select IFC duct type",false,true);ifcType.Name="IfcDuctTypeSource";
+                ifcType.ItemsSource=IfcTypeChoice.Collect(IfcSources??items.Select(i=>i.Source).ToList());
+                var shape=UiDesign.Field(content,"Profile","","Select profile",false,true);shape.Name="NewDuctProfile";shape.ItemsSource=new[]{"Rectangular","Round","Oval"};
+                content.Children.Add(new TextBlock{Text="Name"});var typeName=new TextBox{Name="NewDuctTypeName",Padding=new Thickness(8)};content.Children.Add(typeName);
+                var template=UiDesign.Field(content,"Duplicate existing type","","Select template",false,true);template.Name="NewDuctTemplate";
+                var message=new TextBlock{TextWrapping=TextWrapping.Wrap};content.Children.Add(message);
+                Func<string,List<DuctChoice>> profileTypes=profile=>profile=="Round"?roundTypes:profile=="Oval"?(ovalTypes??new List<DuctChoice>()):rectangularTypes;
+                Action refreshTemplate=()=> {
+                    var profile=shape.SelectedItem as string;
+                    var available=profile==null?new List<DuctChoice>():profileTypes(profile);
+                    template.ItemsSource=available;template.SelectedItem=available.Count==1?available[0]:null;
+                    message.Text=profile==null?"Select a profile.":available.Count==0?"No Revit template exists for this profile. Load one first.":"";
+                };
+                shape.SelectionChanged+=(a,b)=>refreshTemplate();
+                Action followSource=()=> {
+                    bool auto=creationMode.SelectedIndex==1;sourcePanel.Visibility=auto?Visibility.Visible:Visibility.Collapsed;
+                    shape.IsEnabled=!auto;typeName.IsReadOnly=auto;
+                    if(!auto){refreshTemplate();return;}
+                    var source=ifcType.SelectedItem as IfcTypeChoice;
+                    typeName.Text=source?.Name??"";
+                    shape.SelectedItem=source?.Shape=="Square"?"Rectangular":source?.Shape;
+                    refreshTemplate();
+                    if(source!=null && template.ItemsSource!=null)template.SelectedItem=template.Items.Cast<DuctChoice>().FirstOrDefault(t=>string.Equals(t.Name,source.Name,StringComparison.OrdinalIgnoreCase))??template.SelectedItem;
+                };
+                creationMode.SelectionChanged+=(a,b)=>followSource();ifcType.SelectionChanged+=(a,b)=>followSource();
+                var add=IFCInfoWindow.Button("Create",true);content.Children.Add(add);
+                add.Click+=(a,b)=>{try {
+                    if(CreateDuctType==null)throw new InvalidOperationException("Connect to a Revit project first.");
+                    if(template.SelectedItem==null)throw new InvalidOperationException("Select a Revit template with the chosen profile.");
+                    long id=CreateDuctType(typeName.Text.Trim(),((DuctChoice)template.SelectedItem).Id);
+                    var choice=new DuctChoice{Id=id,Name=typeName.Text.Trim()};string profile=(string)shape.SelectedItem;
+                    if(profile=="Oval" && ovalTypes==null)ovalTypes=new List<DuctChoice>();
+                    profileTypes(profile).Add(choice);
+                    foreach(var pair in editors) {
+                        var first=items.First(i=>i.GroupKey==pair.Key);
+                        bool matches=profile=="Round"?first.Round:profile=="Oval"?first.Oval:!first.Round&&!first.Oval;
+                        if(!matches)continue;
+                        var list=pair.Value.TypeBox.Items.Cast<DuctChoice>().ToList();if(!list.Any(t=>t.Id==id))list.Add(choice);pair.Value.TypeBox.ItemsSource=list;
+                        if(mode.SelectedIndex==0)pair.Value.TypeBox.SelectedItem=choice;
+                    }
+                    refreshTypes();
+                    var common=sharedTypes.Items.Cast<DuctChoice>().FirstOrDefault(t=>t.Id==id);if(common!=null)sharedTypes.SelectedItem=common;
+                    dialog.Close();
+                }catch(Exception ex){message.Text=ex.Message;}};
+                UiDesign.SetContent(dialog,new ScrollViewer{Content=content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto});dialog.ShowDialog();
+            };            refreshTypes();applyMode();
+            section("Level");
             var levelMapping = new Dictionary<string, ComboBox>();
-            var manualLevel = new CheckBox { Content="Manual · Map source levels to target levels", IsChecked=saved.Levels.Any(m=>m.Id>0), Margin=new Thickness(0,16,0,8) };
-            body.Children.Add(manualLevel);
-            body.Children.Add(IFCInfoWindow.Text("Disable Manual to select a level below the duct automatically. The IFC centerline remains unchanged.",12,"#716B63"));
-            manualLevel.Checked += (s,e) => { foreach(var box in levelMapping.Values) box.IsEnabled=true; };
-            manualLevel.Unchecked += (s,e) => { foreach(var box in levelMapping.Values) box.IsEnabled=false; };
-            foreach (var key in items.Select(i=>i.LevelKey ?? "No source level").Distinct())
-            {
-                var box = UiDesign.Field(body, "Source level: " + key, "Automatically select a level below the duct, or map a target level", "Level", false);
-                var choices = new List<DuctChoice> { new DuctChoice { Id = 0, Name = "Automatic by elevation" } }; choices.AddRange(levels);
-                box.ItemsSource = choices;
-                box.SelectedItem = choices.FirstOrDefault(c=>c.Id == saved.Levels.FirstOrDefault(m=>m.Key == key)?.Id) ?? choices[0];
-                levelMapping[key] = box;
-                box.IsEnabled=manualLevel.IsChecked==true;
+            var manualLevelValues=new Dictionary<string,long>();
+            var followLevel=new DuctChoice{Id=0,Name="Follow IFC — match name / elevation"};
+            var commonLevel=UiDesign.Field(body,"Level","","Select level",false,true);commonLevel.Name="SharedLevel";
+            commonLevel.ItemsSource=new[]{followLevel}.Concat(levels).ToList();commonLevel.SelectedItem=followLevel;
+            groupsBody.Children.Add(new Border{Height=1,Background=IFCInfoWindow.Brush("#DDD6CE"),Margin=new Thickness(0,16,0,12)});
+            groupsBody.Children.Add(IFCInfoWindow.Text("Level",16,"#37322B"));
+            foreach(var key in items.Select(i=>i.LevelKey??"No source level").Distinct()) {
+                var box=UiDesign.Field(groupsBody,"Source level: "+key,"","Select target level",false,true);box.Name="GroupLevel";
+                var choices=new[]{new DuctChoice{Id=0,Name="Automatic by elevation"}}.Concat(levels).ToList();
+                box.ItemsSource=choices;
+                long savedId=saved.Levels.FirstOrDefault(m=>m.Key==key)?.Id??0;
+                box.SelectedItem=choices.FirstOrDefault(c=>c.Id==savedId)??choices[0];
+                manualLevelValues[key]=((DuctChoice)box.SelectedItem).Id;
+                levelMapping[key]=box;
             }
-            var worksetMapping = new Dictionary<string, ComboBox>();
+            bool autoLevels=false;
+            Action applyLevels=()=> {
+                bool auto=mode.SelectedIndex==1;commonLevel.IsEnabled=auto;
+                if(auto && !autoLevels)foreach(var pair in levelMapping)manualLevelValues[pair.Key]=(pair.Value.SelectedItem as DuctChoice)?.Id??0;
+                foreach(var pair in levelMapping) {
+                    var choices=new[]{new DuctChoice{Id=0,Name="Automatic by elevation"}}.Concat(levels).ToList();
+                    pair.Value.IsEnabled=!auto;
+                    if(auto) {
+                        var selected=commonLevel.SelectedItem as DuctChoice;
+                        var resolved=selected?.Id>0?selected:levels.FirstOrDefault(l=>string.Equals(l.Name,pair.Key,StringComparison.OrdinalIgnoreCase));
+                        var display=new DuctChoice{Id=resolved?.Id??0,Name=selected?.Id>0?resolved.Name:"Follow IFC — "+(resolved?.Name??"by elevation")};
+                        pair.Value.ItemsSource=new[]{display};pair.Value.SelectedItem=display;
+                    } else if(autoLevels) {
+                        pair.Value.ItemsSource=choices;pair.Value.SelectedItem=choices.FirstOrDefault(c=>c.Id==manualLevelValues[pair.Key])??choices[0];
+                    }
+                }
+                autoLevels=auto;
+            };
+            mode.SelectionChanged+=(s,e)=>applyLevels();commonLevel.SelectionChanged+=(s,e)=>applyLevels();applyLevels();            var worksetMapping = new Dictionary<string, ComboBox>();
             if (worksets.Count > 0)
             foreach (var key in editors.Keys)
             {
@@ -162,7 +308,7 @@ namespace IFCInfo
             var remember = new CheckBox { Content = "Save mappings in the Revit project", IsChecked = true, Margin = new Thickness(0,16,0,8) };
             var fittings = new CheckBox { Content = "Connect duct ends: elbow, transition, tee", Margin = new Thickness(0,8,0,8) };
             var terminals = new CheckBox { Content = "Connect host-model air terminals at duct ends (maximum 1 mm)", Margin = new Thickness(0,8,0,8) };
-            foreach(var option in new[] { manualLevel, remember, fittings, terminals })
+            foreach(var option in new[] { remember, fittings, terminals })
                 option.Content=IFCInfoWindow.Text((string)option.Content,13,"#37322B");
             body.Children.Add(remember); body.Children.Add(fittings); body.Children.Add(terminals);
             body.Children.Add(IFCInfoWindow.Text("Maximum elbow/transition gap (mm). Use 1 for coincident ends; increase to allow Revit to adjust duct ends.",13,"#716B63"));
@@ -176,7 +322,7 @@ namespace IFCInfo
             preview.Columns.Add(new DataGridTextColumn { Header = "Target duct", Binding = new System.Windows.Data.Binding("PreviewTarget"), IsReadOnly=true });
             preview.Columns.Add(new DataGridTextColumn { Header = "Changes", Binding = new System.Windows.Data.Binding("PreviewChange"), IsReadOnly=true });
             UiDesign.StyleTable(preview);
-            preview.Name="DuctSourcePreview";
+            preview.Name="DuctSourcePreview";preview.Visibility=Visibility.Collapsed;
             preview.FontSize=12;
             var compactHeader=new Style(typeof(System.Windows.Controls.Primitives.DataGridColumnHeader),preview.ColumnHeaderStyle);
             compactHeader.Setters.Add(new Setter(Control.PaddingProperty,new Thickness(4,8,4,8)));
@@ -205,12 +351,12 @@ namespace IFCInfo
             };
             Action refreshSelection = () =>
             {
+                refreshTypes();
                 int count = items.Count(i => i.Include);
                 includeHeader.IsEnabled=items.Count>0;includeHeader.IsChecked=count==0?false:count==items.Count?(bool?)true:null;
                 create.Content = (updating ? "Update " : "Create ") + count + " Duct";
                 create.IsEnabled = count > 0;
-                ((TextBlock)summary.Child).Text = "Selected: " + count + " segments     ·     Unchecked: "
-                    + (items.Count - count) + " segments     ·     Skipped: " + issues.Count + " segments";
+                ((TextBlock)summary.Child).Text=count+" selected"+(issues.Count>0?" · "+issues.Count+" skipped":"");
                 refreshProjectStatus();
             };
             System.ComponentModel.PropertyChangedEventHandler selectionChanged = (s, e) =>
@@ -220,7 +366,7 @@ namespace IFCInfo
             foreach (var item in items) item.PropertyChanged += selectionChanged;
             Closed += (s, e) => { foreach (var item in items) item.PropertyChanged -= selectionChanged; };
             refreshSelection();
-            var note = IFCInfoWindow.Text("Fittings use Routing Preferences. Only unambiguous end pairs are connected; tees require three meeting ends and do not split ducts. The IFC System Name is stored in Comments.", 13, "#716B63");
+            var note = IFCInfoWindow.Text("Fittings use Routing Preferences. Only unambiguous end pairs are connected; tees require three meeting ends and do not split ducts.", 13, "#716B63");
             note.Margin = new Thickness(2,16,2,8); body.Children.Add(note);
             if (issues.Count > 0)
             {
@@ -270,7 +416,8 @@ namespace IFCInfo
                     DuctTypes = editors.Where(p => systemKeys.Contains(p.Key)).ToDictionary(p => p.Key, p => ((DuctChoice)p.Value.TypeBox.SelectedItem).Id),
                     SystemTypes = editors.Where(p => systemKeys.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value.NewSystem != null ? 0 : ((DuctChoice)p.Value.SystemBox.SelectedItem).Id),
                     NewSystems = newSystems,
-                    Levels = levelMapping.Where(p => levelKeys.Contains(p.Key)).ToDictionary(p => p.Key, p => manualLevel.IsChecked==true ? ((DuctChoice)p.Value.SelectedItem).Id : 0),
+                    NewDuctTypes=editors.Where(p=>systemKeys.Contains(p.Key) && p.Value.NewType!=null).ToDictionary(p=>p.Key,p=>p.Value.NewType),
+                    Levels = levelMapping.Where(p => levelKeys.Contains(p.Key)).ToDictionary(p => p.Key, p => ((DuctChoice)p.Value.SelectedItem).Id),
                     Worksets = worksetMapping.Where(p => systemKeys.Contains(p.Key)).ToDictionary(p => p.Key, p => ((DuctChoice)p.Value.SelectedItem).Id),
                     KeepSuccessful = policy.SelectedIndex == 1, SaveSettings = remember.IsChecked == true,
                     CreateFittings = fittings.IsChecked == true, ConnectTerminals = terminals.IsChecked == true,

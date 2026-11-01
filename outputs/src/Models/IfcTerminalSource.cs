@@ -18,6 +18,7 @@ namespace IFCInfo
     }
     public sealed class IfcPropertyValue
     {
+        public string DataType {get;set;}
         public string Scope { get; set; }
         public string SetName { get; set; }
         public string Name { get; set; }

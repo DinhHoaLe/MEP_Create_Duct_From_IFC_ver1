@@ -294,7 +294,7 @@ namespace IFCInfo
                     if(Ref(unit)!=0) { try { scale=UnitMetres(Ref(unit),0)*1000; } catch(NotSupportedException) {scale=null;} catch(FormatException) {scale=null;} }
                     if(scale.HasValue && double.TryParse(value,NumberStyles.Float,CultureInfo.InvariantCulture,out numeric) && numeric>0)lengthMm=numeric*scale.Value;
                 }
-                output.Add(new IfcPropertyValue { Scope=scope,SetName=setName,Name=name,Value=value,Unit=unitText,LengthMm=lengthMm });
+                output.Add(new IfcPropertyValue { Scope=scope,SetName=setName,Name=name,Value=value,Unit=unitText,LengthMm=lengthMm,DataType=p.Kind=="IFCPROPERTYSINGLEVALUE" ? p.At(2).Split((char)40)[0] : p.Kind });
             }
             path.Remove(id);
         }

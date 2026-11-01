@@ -41,6 +41,16 @@ namespace IFCInfo
                 try
                 {
                     if(request.ParameterMappings.Count>0)RunTransaction(doc,"IFC - Create mapped parameters",()=>DuctParameterMapping.Ensure(doc,request.ParameterMappings));
+                    if(request.NewDuctTypes.Count>0)RunTransaction(doc,"IFC - Create Duct Types",()=>{
+                        foreach(var pair in request.NewDuctTypes) {
+                            var proposed=pair.Value;var template=doc.GetElement(ElementIds.Create(proposed.TemplateId)) as DuctType;
+                            if(template==null)throw new InvalidOperationException("Missing duct type template.");
+                            var matches=new FilteredElementCollector(doc).OfClass(typeof(DuctType)).Cast<DuctType>().Where(t=>string.Equals(t.Name,proposed.Name,StringComparison.OrdinalIgnoreCase)).ToList();
+                            if(matches.Count>1 || matches.Any(t=>t.Shape!=template.Shape))throw new InvalidOperationException("IFC duct type name conflicts with a different profile: "+proposed.Name);
+                            request.DuctTypes[pair.Key]=(matches.FirstOrDefault()??template.Duplicate(proposed.Name)).Id.Number();
+                        }
+                    });
+                    DuctParameterMapping.ValidateTypeValues(doc,request);
                     foreach (var item in request.Items)
                     {
                         var row=new DuctRunRow { RunId=run,SourceId=item.Source.ElementId,IfcGuid=item.Source.IfcGuid,IfcPsets=IfcPropertyStorage.Text(item.Source) }; rows.Add(row);
@@ -172,8 +182,6 @@ namespace IFCInfo
                 throw new InvalidOperationException("Dimensions after regeneration do not match IFC.");
             RecordSource(duct,item.Key,item.Source,system.Number());
             IfcPropertyStorage.Save(duct,item.Source);
-            var comments=duct.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
-            if (comments!=null && !comments.IsReadOnly) comments.Set("IFC GUID: "+item.Source.IfcGuid+" | System Name: "+item.Source.SystemName+" | System Type: "+item.Source.SystemType);
             return duct;
         }
         internal static void RecordSource(Duct duct,string key,AirTerminalRow row,long system)

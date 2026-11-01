@@ -1,0 +1,11 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  IFCInfo -> D:\2_Revit\6_Working\00. Revit_API\Project\MEP_Create_Duct_From_IFC_ver1\outputs\bin\Release\net48\IFCInfo.dll
+  UiPreview -> D:\2_Revit\6_Working\00. Revit_API\Project\MEP_Create_Duct_From_IFC_ver1\tools\UiPreview\bin\Release\net48\UiPreview.exe
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:01.36
+PASS: 168 WPF regression checks.

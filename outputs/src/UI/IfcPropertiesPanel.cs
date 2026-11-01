@@ -37,6 +37,12 @@ namespace IFCInfo
             style.Setters.Add(new Setter(TextBlock.MarginProperty, new Thickness(5)));
             properties.Columns.Add(new DataGridTextColumn { Header="Property", Binding=new Binding("Key"), Width=new DataGridLength(1,DataGridLengthUnitType.Star), ElementStyle=style });
             properties.Columns.Add(new DataGridTextColumn { Header="Value", Binding=new Binding("Value"), Width=new DataGridLength(1.2,DataGridLengthUnitType.Star), ElementStyle=style });
+            ScrollViewer.SetHorizontalScrollBarVisibility(properties,ScrollBarVisibility.Disabled);
+            properties.SizeChanged+=(s,e)=> {
+                double width=System.Math.Max(80,properties.ActualWidth-22);
+                properties.Columns[0].Width=new DataGridLength(width*.43);
+                properties.Columns[1].Width=new DataGridLength(width*.57);
+            };
             properties.GroupStyle.Add(new GroupStyle
             {
                 ContainerStyle = (Style)System.Windows.Markup.XamlReader.Parse(@"
