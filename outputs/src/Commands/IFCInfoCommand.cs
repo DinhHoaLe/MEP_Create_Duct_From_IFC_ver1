@@ -30,12 +30,29 @@ namespace IFCInfo
                 var links = IfcLinkCatalog.GetLinks(doc);
                 long? lastLinkId = null;
                 long? lastCategoryId = null;
+                CategoryReviewSession lastReview=null;
+                DashboardSelection dashboardChoice=null;
+                bool showDashboard=true;
                 while (true)
                 {
+                    if(showDashboard)
+                    {
+                        var dashboard=new WorkflowDashboard(dashboardChoice);
+                        new System.Windows.Interop.WindowInteropHelper(dashboard).Owner=commandData.Application.MainWindowHandle;
+                        if(dashboard.ShowDialog()!=true)break;
+                        var nextChoice=dashboard.Selection;
+                        if(dashboardChoice==null || dashboardChoice.Summary!=nextChoice.Summary)
+                        {
+                            lastCategoryId=null;lastReview=null;
+                        }
+                        dashboardChoice=nextChoice;showDashboard=false;
+                    }
                     var dialog = new IFCInfoWindow();
+                    dialog.DashboardChoice=dashboardChoice;
                     dialog.Links = links;
                     dialog.InitialLinkId = lastLinkId;
                     dialog.InitialCategoryId = lastCategoryId;
+                    dialog.InitialReview=lastReview;
                     RevitLinkInstance selectedLink = null;
                     dialog.LoadLink = option =>
                     {
@@ -44,6 +61,7 @@ namespace IFCInfo
                         if (link?.GetLinkDocument() == null)
                             throw new InvalidOperationException("The link is unloaded.");
                         CategoryReader.Configure(dialog, link.GetLinkDocument(), option);
+                        dialog.Categories=dialog.Categories.Where(dashboardChoice.Includes).ToList();
                         DuctWorkflow.Configure(dialog, doc, link);
                         selectedLink = link;
                     };
@@ -65,11 +83,20 @@ namespace IFCInfo
                     };
                     new System.Windows.Interop.WindowInteropHelper(dialog).Owner = commandData.Application.MainWindowHandle;
                     dialog.ShowDialog();
+                    if(dialog.DashboardRequested)
+                    {
+                        lastLinkId=dialog.SelectedLink?.Id;
+                        lastCategoryId=dialog.SelectedCategory?.Id;
+                        lastReview=dialog.ExportReviewSession();
+                        showDashboard=true;
+                        continue;
+                    }
                     bool hasRequest = dialog.DuctCreationRequest != null || dialog.Replacement != null;
                     if (selectedLink == null || (!hasRequest && dialog.NavigationRow == null))
                         break;
                     lastLinkId = dialog.SelectedLink?.Id;
                     lastCategoryId = dialog.SelectedCategory?.Id;
+                    lastReview=dialog.ExportReviewSession();
                     try
                     {
                         if (dialog.NavigationRow != null)

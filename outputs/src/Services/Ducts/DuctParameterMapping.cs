@@ -51,13 +51,86 @@ namespace IFCInfo
             DuctCreation.RunTransaction(doc,"IFC - Transfer mapped parameters",()=>
             {
                 Ensure(doc,mappings);doc.Regenerate();
+                foreach(var map in mappings)
+                foreach(var group in pairs.Where(p=>map.Applies(p.Item2)).GroupBy(p=>p.Item1.GetTypeId().Number()))
+                {
+                    if(!IsTypeTarget(doc,map.Target))continue;
+                    if(group.Select(p=>IfcParameterMapping.Read(p.Item2,map.Source)).Where(v=>v!=null).Distinct().Count()>1)
+                        throw new InvalidOperationException("Different IFC values for Type parameter '"+map.Target+"'. Use an Instance parameter or separate Duct Types.");
+                }
+                var before=pairs.ToDictionary(p=>p.Item1.Id.Number(),p=>DuctRevision.Actual(p.Item1));
                 foreach(var pair in pairs)
                 {
-                    foreach(var map in mappings)if(IfcParameterMapping.Read(pair.Item2,map.Source)==null)missing++;else written++;
+                    foreach(var map in mappings.Where(m=>m.Applies(pair.Item2)))if(IfcParameterMapping.Read(pair.Item2,map.Source)==null)missing++;else written++;
                     Apply(pair.Item1,pair.Item2,mappings);
                 }
+                foreach(var pair in pairs)DuctRevision.RefreshActualIfUnchanged(pair.Item1,before[pair.Item1.Id.Number()]);
             });
             return "Transferred "+written+" value(s) to "+pairs.Count+" existing duct(s). "+missing+" source value(s) missing; those targets were unchanged. Geometry was unchanged.";
+        }
+        static bool IsTypeTarget(Document doc,string name)
+        {
+            if(CommentId(name)==BuiltInParameter.ALL_MODEL_TYPE_COMMENTS)return true;
+            var it=doc.ParameterBindings.ForwardIterator();while(it.MoveNext())if(it.Key.Name==name)return it.Current is TypeBinding;
+            return false;
+        }
+        internal static List<ParameterValuePreview> Preview(Document doc,RevitLinkInstance link,List<AirTerminalRow> sources,List<IfcParameterMapping> mappings)
+        {
+            var tracked=DuctCreation.TrackedDucts(doc);var result=new List<ParameterValuePreview>();
+            foreach(var source in sources)
+            foreach(var map in mappings.Where(m=>m.Applies(source)))
+            {
+                var row=new ParameterValuePreview{SourceId=source.ElementId,IFCProperty=map.Source,RevitParameter=map.Target,CurrentValue="",TargetId=""};result.Add(row);
+                try
+                {
+                    string value=IfcParameterMapping.Read(source,map.Source);row.ProposedValue=value??"(missing; unchanged)";
+                    if(value==null){row.Status="Missing IFC value; target unchanged";continue;}
+                    long id;if(!long.TryParse(source.ElementId,out id))throw new InvalidOperationException("Invalid source ID.");
+                    var element=link.GetLinkDocument()?.GetElement(ElementIds.Create(id));if(element==null)throw new InvalidOperationException("Source no longer exists.");
+                    string key=link.UniqueId+"|"+(string.IsNullOrWhiteSpace(source.IfcGuid)?element.UniqueId:source.IfcGuid);
+                    List<Autodesk.Revit.DB.Mechanical.Duct> targets;
+                    tracked.TryGetValue(key,out targets);
+                    if(targets!=null && targets.Count>1)throw new InvalidOperationException("Multiple tracked ducts; resolve duplicate tracking before transfer.");
+                    var duct=targets?.SingleOrDefault();
+                    Parameter parameter=null;
+                    if(duct!=null)
+                    {
+                        row.TargetId=duct.Id.Number().ToString();
+                        row.TargetTypeId=duct.GetTypeId().Number();row.TypeParameter=IsTypeTarget(doc,map.Target);
+                        var builtIn=CommentId(map.Target);
+                        var owner=builtIn==BuiltInParameter.ALL_MODEL_TYPE_COMMENTS?doc.GetElement(duct.GetTypeId()):duct;
+                        var matches=builtIn.HasValue?new List<Parameter>{owner.get_Parameter(builtIn.Value)}:duct.GetParameters(map.Target);
+                        if(matches.Count==0)matches=doc.GetElement(duct.GetTypeId()).GetParameters(map.Target);
+                        if(matches.Count>1)throw new InvalidOperationException("Ambiguous target parameter.");
+                        parameter=matches.SingleOrDefault();
+                        if(parameter!=null){row.CurrentValue=parameter.AsValueString()??parameter.AsString()??"";if(parameter.IsReadOnly)throw new InvalidOperationException("Read-only target parameter.");}
+                    }
+                    ForgeTypeId type=parameter?.Definition.GetDataType();
+                    if(type==null)
+                    {
+                        var it=doc.ParameterBindings.ForwardIterator();while(it.MoveNext())if(it.Key.Name==map.Target){type=it.Key.GetDataType();break;}
+                        if(type==null)type=TypeId(map.ParameterType);
+                    }
+                    if(type==SpecTypeId.Length)
+                    {
+                        var p=source.IfcProperties.SingleOrDefault(v=>IfcParameterMapping.Key(v)==map.Source || v.Name==map.Source);
+                        if(p?.LengthMm==null)throw new InvalidOperationException("IFC length unit is unresolved; value cannot be transferred.");
+                        row.ProposedValue=p.LengthMm.Value.ToString("G",System.Globalization.CultureInfo.InvariantCulture)+" mm";
+                    }
+                    else if(type==SpecTypeId.Int.Integer)int.Parse(value,System.Globalization.CultureInfo.InvariantCulture);
+                    else if(type==SpecTypeId.Number)double.Parse(value,System.Globalization.CultureInfo.InvariantCulture);
+                    else if(type==SpecTypeId.Boolean.YesNo && !new[]{"TRUE","FALSE",".T.",".F.","1","0"}.Contains(value.Trim().ToUpperInvariant()))throw new InvalidOperationException("Invalid Yes/No value.");
+                    string state=Check(doc,map.Target);
+                    row.Status=state!="Ready"?state=="Missing"?"Target parameter is missing; create it first":state
+                        :duct==null?"New duct; no tracked target yet":IsTypeTarget(doc,map.Target)?"Ready; shared Type value":"Ready to update existing duct";
+                }
+                catch(Exception ex){row.Status=ex.Message;}
+            }
+            foreach(var group in result.Where(r=>r.TypeParameter && r.TargetTypeId>0 && r.Status.StartsWith("Ready"))
+                .GroupBy(r=>r.TargetTypeId+"|"+r.RevitParameter))
+                if(group.Select(r=>r.ProposedValue).Distinct().Count()>1)
+                    foreach(var row in group)row.Status="Conflicting IFC values for shared Type; use Instance or separate Duct Types.";
+            return result;
         }
         internal static string Check(Document doc,string name)
         {

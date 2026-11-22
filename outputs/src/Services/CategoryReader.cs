@@ -21,7 +21,8 @@ namespace IFCInfo
                 window.Categories = collector.WhereElementIsNotElementType().ToElements()
                     .Where(element => element.Category != null && SupportedCategories.Contains(element.Category.Id.Number()))
                     .GroupBy(element => element.Category.Id.Number())
-                    .Select(group => new CategoryOption { Id = group.Key, Name = group.First().Category.Name })
+                    .Select(group => new CategoryOption { Id = group.Key, Name = group.First().Category.Name,Count=group.Count(),
+                        Kind=SupportedCategories.IsLine(group.Key)?"Line":"Family" })
                     .OrderBy(category => category.Name).ToList();
             var previewCache=new Dictionary<long,IfcPreviewMesh>();
             window.LoadPreview = row =>
@@ -105,6 +106,8 @@ namespace IFCInfo
                         var row = new AirTerminalRow
                         {
                             ElementId = element.Id.ToString(),
+                            CategoryId=category.Id,
+                            CategoryName=element.Category?.Name??category.Name,
                             Name = element.Name,
                             IfcGuid = guid,
                             NativeShape = connector == null ? null : connector.Shape == ConnectorProfileType.Round ? "Round" :

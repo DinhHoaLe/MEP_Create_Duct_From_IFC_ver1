@@ -24,7 +24,7 @@ namespace IFCInfo
                 }
                 return result.Concat(DuctParameterMapping.BuiltInComments()).OrderBy(x=>x.Name).ToList();
             };
-            window.ParameterTypes=()=>SpecUtils.GetAllSpecs().Select(id=>new ParameterOption {Id=id.TypeId,Name=LabelUtils.GetLabelForSpec(id),Discipline=UnitUtils.IsMeasurableSpec(id)?LabelUtils.GetLabelForDiscipline(UnitUtils.GetDiscipline(id)):"Common"}).OrderBy(x=>x.Name).ToList();
+            window.ParameterTypes=()=>SpecUtils.GetAllSpecs().Concat(new[]{SpecTypeId.String.Text,SpecTypeId.Int.Integer,SpecTypeId.Number,SpecTypeId.Boolean.YesNo,SpecTypeId.Length}).Distinct().Select(id=>new ParameterOption {Id=id.TypeId,Name=LabelUtils.GetLabelForSpec(id),DataKind=DuctParameterMapping.Kind(id),Discipline=UnitUtils.IsMeasurableSpec(id)?LabelUtils.GetLabelForDiscipline(UnitUtils.GetDiscipline(id)):"Common"}).OrderBy(x=>x.Name).ToList();
             window.ParameterGroups=()=>ParameterUtils.GetAllBuiltInGroups().Select(id=>new ParameterOption{Id=id.TypeId,Name=LabelUtils.GetLabelForGroup(id)}).OrderBy(x=>x.Name).ToList();
             window.CreateParameter=(name,type,group,binding)=> {
                 if(string.IsNullOrWhiteSpace(name) || name.IndexOfAny(new[]{(char)92,'/',':','{','}','[',']','|',';','<','>','?'})>=0)throw new InvalidOperationException("Enter a valid parameter name.");
@@ -34,6 +34,7 @@ namespace IFCInfo
             window.CheckParameterTarget=name=>DuctParameterMapping.Check(doc,name);
             window.LoadParameterTargets=()=>DuctParameterMapping.Targets(doc);
             window.TransferParameters=(rows,maps)=>DuctParameterMapping.Transfer(doc,link,rows,maps);
+            window.PreviewParameters=(rows,maps)=>DuctParameterMapping.Preview(doc,link,rows,maps);
             var loadCategory = window.LoadCategory;
             window.LoadCategory = category =>
             {

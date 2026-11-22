@@ -34,6 +34,12 @@ namespace IFCInfo
         {
             return DuctSnapshotComparison.Equal(a,b);
         }
+        internal static void RefreshActualIfUnchanged(Duct duct,string before)
+        {
+            var schema=Schema.Lookup(Id);if(schema==null)return;
+            var entity=duct.GetEntity(schema);if(!entity.IsValid() || !Equal(entity.Get<string>(schema.GetField("Actual")),before))return;
+            entity.Set(schema.GetField("Actual"),Actual(duct));duct.SetEntity(entity);
+        }
         internal static string Get(Duct d, string field)
         {
             var schema = Schema.Lookup(Id); if (schema == null) return null;

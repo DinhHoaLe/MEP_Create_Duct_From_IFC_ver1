@@ -1,0 +1,4 @@
+IFCProperty,ParameterName,DataType
+IFC GUID,IFC Guid,Text
+IFC Element ID,IFC Element ID,Integer
+,Review Note,Text

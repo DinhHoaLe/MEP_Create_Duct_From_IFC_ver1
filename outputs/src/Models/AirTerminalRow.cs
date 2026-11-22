@@ -43,6 +43,8 @@ namespace IFCInfo
         }
         public string DuctExistenceDetail { get; set; }
         public string ElementId { get; set; }
+        public long CategoryId {get;set;}
+        public string CategoryName {get;set;}
         public string Name { get; set; }
         public string SystemType { get; set; }
         public string SystemName { get; set; }

@@ -1,5 +1,5 @@
 CREATE DUCT FROM IFC - USER GUIDE
-Updated: 11 October 2026
+Updated: 22 November 2026
 
 1. LOAD THE TOOL
 - Revit 2023/2024, .NET Framework 4.8, Windows x64.
@@ -8,7 +8,12 @@ Updated: 11 October 2026
 - Close/reopen Revit if a previously loaded DLL is still in memory. Do not load a Revit 2024 DLL into Revit 2023.
 
 2. SELECT THE SOURCE
-- Open a project, select a loaded direct IFC link and a source category, then click Continue.
+- Open a project and select a loaded direct IFC link. The Source page lists categories, not individual elements: four Line categories (Ducts, Pipes, Cable Trays, Conduits) and 21 supported Family categories. Only categories with elements in the selected link appear. Each row shows the category name and linked-element count; tab counts are category counts. See CATEGORY_PLACEMENT.md for the full supported list.
+- Search categories by name; click Category or Elements in link to sort. Check one or more category rows before Continue. Checks remain selected across Line/Family tabs and filters. The header checkbox selects or clears visible categories in that group.
+- The Elements page (Step 2) provides a Review category list when multiple categories were checked. Choose a category to load its individual elements and IFC properties/comparisons, then check elements there. Element checks and parameter mapping rows (including drafts) are retained separately when switching categories. Each create/update operation uses the active category's builder and selections; selecting multiple categories does not combine incompatible duct/family creation settings into one operation.
+- Step 2 includes a Category column populated from each source element. Search accepts category names, and Category can be sorted through its column header or the sort menu. Copied element tables include the category.
+- Existing/full-coverage ducts remain ineligible for duplicate creation. The Source page does not preselect individual elements. Category queues, active category, element checks and mapping rows are retained when a native placement or cancelled model pick returns to the tool in the same command session; closing the tool ends this temporary session.
+- On short windows, the header switches to a compact layout and the category list uses available space with its own scrollbar. Link selection and Continue remain fixed outside the list; there is no outer Source-page scrolling that can hide the link fields.
 - Bound/imported IFC and nested links are not handled as direct linked sources.
 - The original IFC is resolved from metadata, the link folder, the linked document path and the host-model folder. A cache named X.ifc.RVT resolves to X.ifc beside it.
 - If the source cannot be found, select the matching .ifc file. This path is remembered per link for the current session, including subsequent creation runs; it is not persisted across tool sessions.
@@ -16,6 +21,16 @@ Updated: 11 October 2026
 - Reload the same Revit link after changing the IFC on disk. Matching GUIDs alone do not prove that the link is current.
 
 3. CREATE DUCTS
+- The Parameters toolbar is grouped: Parameters (add/create/bulk creation/project catalog), CSV (import/export/template), Presets (save/load) and Values (preview/update existing ducts). The Refresh icon reloads the catalogs. Hover controls for their descriptions; open a group to access its named actions.
+- Export selected IFC CSV writes exact qualified property names and inferred supported data types from checked sources (or highlighted sources when no eligible sources are checked). Target names receive an IFC_ prefix and duplicate names receive suffixes. Review the exported definitions before importing.
+- Save mapping preset / Load mapping preset use a portable XML file containing complete source/target names, data types, groups and bindings, without model IDs or values. Loading replaces the editable mapping list without creating project parameters. Missing sources/targets need review; Create multiple from IFC uses saved target names when preparing missing definitions. Group and binding for a bulk creation batch remain chosen in that preview.
+- In Create multiple from IFC / Import parameter CSV, edit the prefix and use Apply prefix / resolve names for selected unfinished rows. Existing project names and unselected rows are reserved; invalid characters are replaced and collisions receive suffixes. This changes proposed names, not existing project definitions.
+- Preview values shows highlighted source rows when present, otherwise checked source rows: current tracked duct values, proposed IFC values and validation notes. The preview writes nothing, reports unresolved length units and conflicting Type values on tracked targets, and cannot show a current value for a duct that has not yet been created.
+- To update values without rebuilding ducts: highlight source rows in Elements (Ctrl/Shift for multiple rows, including sources locked against duplicate creation), configure complete parameter pairs in Parameters, optionally Preview values, then Update existing ducts. Exactly one tool-tracked duct is required for each source. Values are written in one transaction; conflicting values for shared Type parameters are rejected. Missing IFC values leave targets unchanged. No geometry is created or changed, but Type parameter writes also affect other ducts using that type.
+- Create multiple from IFC opens a preview of parameters inferred from the checked sources. Select rows, edit target names as needed, choose a group and Instance/Type binding, then Create selected. Existing compatible parameters are reused. Unknown/conflicting data types are excluded; duplicate target names require renaming or unchecking. Successful rows remain if another creation fails. Values are transferred later, when ducts are created.
+- Import parameter CSV uses UTF-8 comma-separated columns IFCProperty,ParameterName,DataType. DataType is optional when IFCProperty is present and known. Use the exact qualified property name shown in the tool, or IFC GUID / IFC Element ID. Supported CSV data types: Text, Integer, Number, Yes/No, Length. A blank IFCProperty creates a parameter without mapping and requires DataType. Group and binding are selected in the preview. Use Export CSV template or outputs/examples/IFC-parameter-template.csv as a starting point. This imports parameter definitions/mappings, not .rfa families or parameter values.
+- Parameter mapping is optional. Click Next: Create Ducts to continue without additional parameters. Incomplete pairs are skipped, with a summary showing how many remain unfinished. Only complete IFC Property / Revit Parameter pairs transfer values; invalid complete pairs still require correction.
+- In Add parameters, Select all selects every available IFC property; Clear selection removes the selection. Already added properties are excluded. Choose Revit targets only for properties you want to transfer; the remaining drafts do not block duct creation.
 - Choose Ducts, inspect the comparison column/tooltips, check source rows and open Duct settings.
 - Straight native ducts can be read directly. DirectShape sources require a single straight solid matching IFC GUID/dimensions. Unsupported geometry is reported without guessing.
 - Select a duct type matching the profile; map system types, levels and worksets where applicable. Supported profiles include round, square, rectangular and supported flat oval extrusions. Ellipses are not automatically converted into Revit flat ovals.
@@ -43,6 +58,8 @@ Updated: 11 October 2026
 - Zoom can keep the tool open. Isolate creates a separate 3D review view with a source-area section box and isolates the link and matching ducts; nearby linked geometry inside that area may remain visible.
 
 6. NATIVE FAMILIES AND OTHER CURVES
+- Additional family categories include MEP equipment, air terminals, duct/pipe accessories and fittings, plumbing fixtures, sprinklers, cable tray/conduit fittings, electrical equipment/fixtures, lighting, communication/safety devices and Generic Models. Use a loaded family/type in the exact same category. Hosted/work-plane/adaptive/line-based placement requirements still apply; category availability is not proof that a particular family can be placed without a host or manual points.
+- Parameter creation/mapping and Update existing ducts remain specific to ducts. For other categories, the Parameters step explains this scope and continues to Placement without applying duct mappings. IFC property storage/reporting during native family placement remains available.
 - Only target types in the source Revit category are allowed. Load a matching .rfa family where applicable.
 - Hosted families require a planar host face in the host model. The source point is projected onto that face; points outside the face cause a failure.
 - Point families use LocationPoint or the bounding-box center. Rotation uses the selected family orientation plus the user's angle; exact IFC fitting geometry is not recreated.

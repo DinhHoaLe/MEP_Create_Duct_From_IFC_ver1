@@ -16,6 +16,219 @@ using IFCInfo;
 internal static class Program
 {
     private static int checks;
+    private static void TestExpandedFamilyCategories()
+    {
+        foreach(var entry in new[]{Tuple.Create((long)Autodesk.Revit.DB.BuiltInCategory.OST_MechanicalEquipment,"Mechanical Equipment"),Tuple.Create((long)Autodesk.Revit.DB.BuiltInCategory.OST_DuctTerminal,"Air Terminals"),Tuple.Create((long)Autodesk.Revit.DB.BuiltInCategory.OST_ElectricalFixtures,"Electrical Fixtures"),Tuple.Create((long)Autodesk.Revit.DB.BuiltInCategory.OST_GenericModel,"Generic Models")})
+        {
+            long category=entry.Item1;
+            var matching=new ReplacementTypeOption{Id=100,CategoryId=category,CategoryName=entry.Item2,Kind="Family",Label="Matching family",Supported=true,PlacementMode="OneLevelBased"};
+            var other=new ReplacementTypeOption{Id=101,CategoryId=(long)Autodesk.Revit.DB.BuiltInCategory.OST_DuctFitting,Kind="Family",Label="Wrong category",Supported=true};
+            var levels=new List<ReplacementLevelOption>{new ReplacementLevelOption{Id=1,Label="Level 1"}};
+            var window=new NativePlacementWindow(new List<AirTerminalRow>{new AirTerminalRow{ElementId="1",CategoryId=(long)category,CategoryName=category.ToString()}},
+                new List<ReplacementTypeOption>{matching,other},levels,null,(long)category,category.ToString(),(file,id)=>new List<ReplacementTypeOption>());
+            var nodes=Descendants(window).OfType<FrameworkElement>().ToList();
+            var target=nodes.OfType<ComboBox>().Single(c=>c.Name=="TargetType");
+            Assert(target.Items.Count==1 && ((ReplacementTypeOption)target.SelectedItem).CategoryId==(long)category,"Expanded family placement only offers a type in the source category: "+category);
+            Assert(nodes.OfType<Button>().Single(b=>b.Name=="CreateNative").IsEnabled,"A loaded compatible family and level allow placement setup: "+category);
+            window.Close();
+            window=new NativePlacementWindow(new List<AirTerminalRow>{new AirTerminalRow{ElementId="1"}},new List<ReplacementTypeOption>{other},levels,null,(long)category,category.ToString(),(file,id)=>new List<ReplacementTypeOption>());
+            nodes=Descendants(window).OfType<FrameworkElement>().ToList();
+            Assert(!nodes.OfType<Button>().Single(b=>b.Name=="CreateNative").IsEnabled && nodes.OfType<Button>().Single(b=>b.Name=="LoadPlacementFamily").Visibility==Visibility.Visible,"New family categories require a matching loaded type and offer RFA loading when missing: "+category);
+            window.Close();
+        }
+    }
+    private static void TestStep2CategoryColumn()
+    {
+        var category=(long)Autodesk.Revit.DB.BuiltInCategory.OST_MechanicalEquipment;
+        var main=new IFCInfoWindow{AirTerminals=new List<AirTerminalRow>{new AirTerminalRow{ElementId="1",Name="AHU",CategoryId=category,CategoryName="Mechanical Equipment"},new AirTerminalRow{ElementId="2",Name="Pump"}},AirTerminalCount=2};
+        typeof(IFCInfoWindow).GetProperty("SelectedCategory").GetSetMethod(true).Invoke(main,new object[]{new CategoryOption{Id=category,Name="Mechanical Equipment",Kind="Family"}});
+        var page=(FrameworkElement)typeof(IFCInfoWindow).GetMethod("CountPage",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(main,null);
+        var table=Descendants(page).OfType<DataGrid>().Single(t=>t.Name!="IfcPropertyValues");
+        Assert(table.Columns.OfType<DataGridTextColumn>().Any(c=>Equals(c.Header,"Category") && ((System.Windows.Data.Binding)c.Binding).Path.Path=="CategoryName"),"Step 2 binds the Category column to per-element category metadata");
+        Assert(main.AirTerminals.All(r=>r.CategoryId==category && r.CategoryName=="Mechanical Equipment"),"Rows without category metadata inherit the active source category");
+        var search=Descendants(page).OfType<TextBox>().Single(t=>t.Name=="IfcElementSearch");search.Text="Mechanical Equipment";
+        Assert(table.Items.Count==2,"Step 2 search matches category names without relying on element names");
+        search.Text="Lighting Fixtures";Assert(table.Items.Count==0,"Category search excludes unrelated categories");search.Text="";
+        var sort=Descendants(page).OfType<Button>().Single(b=>b.Name=="SortSources");sort.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(sort.ContextMenu.Items.OfType<MenuItem>().Any(m=>Equals(m.Header,"Category ↑")),"Step 2 sort menu includes Category");sort.ContextMenu.IsOpen=false;
+        Assert(main.SystemTableText().Contains("Element ID\tCategory\tElement") && main.SystemTableText().Contains("Mechanical Equipment"),"Copied element tables include the Category column");
+        main.Close();
+    }
+    private static void TestProductivityTools()
+    {
+        var used=new HashSet<string>(StringComparer.OrdinalIgnoreCase){"IFC_Code"};
+        Assert(ParameterNames.Unique("Code","IFC_",used)=="IFC_Code_2","Prefix resolves existing names without case-sensitive duplicates");
+        Assert(!ParameterNames.Unique("A/B","IFC:",used).Contains(":"),"Generated prefixes and names replace invalid characters");
+        var preset=new ParameterMappingPreset{Entries=new List<ParameterPresetEntry>{new ParameterPresetEntry{Source="IFC GUID",Target="Saved Guid",DataType="Text",Group="Identity Data",Binding="Instance"}}};
+        var restored=ParameterMappingPreset.Read(ParameterMappingPreset.Write(preset));
+        Assert(restored.Entries.Single().Target=="Saved Guid" && restored.Entries[0].Group=="Identity Data","Reusable preset round-trips mapping names and settings");
+        bool rejected=false;try{ParameterMappingPreset.Read("<!DOCTYPE x [<!ENTITY x SYSTEM 'file:///missing'>]><ParameterMappingPreset/>");}catch(Exception){rejected=true;}
+        Assert(rejected,"Mapping presets reject DTD documents");
+        var row=new AirTerminalRow{ElementId="42",IfcGuid="guid42",DuctExistence="Exact match",IfcProperties=new List<IfcPropertyValue>{
+            new IfcPropertyValue{Scope="Instance",SetName="A",Name="Code",DataType="IFCLABEL",Value="Value A"},
+            new IfcPropertyValue{Scope="Type",SetName="B",Name="Code",DataType="IFCLABEL",Value="Value B"}}};
+        int transfers=0,creations=0,previews=0;
+        var main=new IFCInfoWindow{AirTerminals=new List<AirTerminalRow>{row},CheckParameterTarget=n=>"Ready",LoadParameterTargets=()=>new List<string>{"Saved Guid"}};
+        typeof(IFCInfoWindow).GetField("parameterSelection",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(main,new List<AirTerminalRow>{row});
+        main.RunDuctCreation=()=>creations++;
+        main.TransferParameters=(sources,maps)=>{transfers++;Assert(sources.Single()==row && maps.Single().Target=="Saved Guid","Update existing passes highlighted locked duct sources and the saved mapping");return "Transferred";};
+        main.PreviewParameters=(sources,maps)=>{previews++;return new List<ParameterValuePreview>{new ParameterValuePreview{SourceId=sources.Single().ElementId,TargetId="100",RevitParameter=maps.Single().Target,CurrentValue="old",ProposedValue="guid42",Status="Ready"}};};
+        var tabs=Descendants(main).OfType<TabControl>().Single(t=>t.Name=="WorkflowTabs");
+        var panel=((TabItem)tabs.Items[2]).Content;
+        panel.GetType().GetMethod("ApplyMappingPreset",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(panel,new object[]{restored});
+        var definitions=(List<ParameterCsv.Row>)panel.GetType().GetMethod("SelectedParameterDefinitions",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(panel,null);
+        Assert(definitions.Count==4 && definitions.Where(d=>d.IFCProperty.Contains("Code")).Select(d=>d.ParameterName).Distinct().Count()==2,"Selected IFC CSV preserves qualified names and resolves repeated property names");
+        Assert(ParameterCsv.Read(ParameterCsv.Write(definitions)).Count==4,"Exported selected definitions can be imported without editing headers or quoting");
+        var preview=(Window)panel.GetType().GetMethod("BuildValuePreview",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(panel,null);
+        var values=Descendants(preview).OfType<DataGrid>().Single();
+        Assert(values.IsReadOnly && values.Items.Count==1 && previews==1 && transfers==0 && creations==0,"Value preview reads current/proposed values without writing or creating ducts");
+        preview.Close();
+        var tools=Descendants((DependencyObject)panel).OfType<WrapPanel>().Single(p=>p.Name=="ParameterTools");
+        var actions=tools.Children.OfType<Button>().Where(b=>b.ContextMenu!=null).SelectMany(b=>b.ContextMenu.Items.OfType<MenuItem>()).ToList();
+        Assert(actions.Count==11 && tools.Children.Count==5 && actions.All(a=>a.ToolTip!=null),"Compact parameter menus retain all actions with hover names");
+        actions.Single(a=>Equals(a.Header,"Update existing ducts")).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert(transfers==1 && creations==0,"Update existing writes parameters through its separate action without creating geometry");
+        var saved=(ParameterMappingPreset)panel.GetType().GetMethod("MappingPreset",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(panel,null);
+        Assert(saved.Entries.Count==1 && saved.Entries[0].Source=="IFC GUID","Saving a loaded preset retains portable source names");
+        var invalid=new ParameterMappingPreset{Entries=new List<ParameterPresetEntry>{restored.Entries[0],restored.Entries[0]}};
+        rejected=false;try{panel.GetType().GetMethod("ApplyMappingPreset",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(panel,new object[]{invalid});}catch(Exception){rejected=true;}
+        Assert(rejected && ((ParameterMappingPreset)panel.GetType().GetMethod("MappingPreset",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(panel,null)).Entries.Count==1,"Invalid presets do not replace existing mappings");
+        main.Close();
+    }
+    private static void TestSourceBrowser()
+    {
+        long duct=(long)Autodesk.Revit.DB.BuiltInCategory.OST_DuctCurves, fitting=(long)Autodesk.Revit.DB.BuiltInCategory.OST_DuctFitting,pipe=(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves;
+        int loads=0;
+        var main=new IFCInfoWindow{Links=new List<LinkOption>{new LinkOption{Id=1,Name="Browser.ifc",IsLoaded=true}},Opacity=0,ShowInTaskbar=false};
+        Action<IFCInfoWindow> configure=target=>target.LoadLink=link=> {
+            target.Categories=new List<CategoryOption>{new CategoryOption{Id=duct,Name="Ducts",Kind="Line",Count=3117},new CategoryOption{Id=fitting,Name="Duct Fittings",Kind="Family",Count=2460},new CategoryOption{Id=pipe,Name="Pipes",Kind="Line",Count=12}};
+            target.CheckParameterTarget=n=>"Ready";
+            target.LoadCategory=category=>{loads++;target.CanCreateDucts=category.Id==duct;target.CanReplaceCategory=true;target.AirTerminalCount=2;
+                target.AirTerminals=new List<AirTerminalRow>{new AirTerminalRow{ElementId=category.Id==duct?"10":"20",Name="First element"},new AirTerminalRow{ElementId=category.Id==duct?"11":"21",Name="Second element"}};};
+        };
+        configure(main);CategoryReviewSession savedSession=null;
+        Exception failure=null;
+        main.Loaded+=(s,e)=>main.Dispatcher.BeginInvoke(new Action(()=> {
+            try
+            {
+                Descendants(main).OfType<ComboBox>().Single(c=>Equals(c.Tag,"Select IFC link...")).SelectedIndex=0;
+                var tabs=Descendants(main).OfType<TabControl>().Single(t=>t.Name=="SourceCategoryKinds");
+                var line=(DataGrid)((TabItem)tabs.Items[0]).Content;var family=(DataGrid)((TabItem)tabs.Items[1]).Content;
+                Assert(line.Items.Count==2 && family.Items.Count==1 && loads==0,"Selecting a link lists categories, not thousands of individual elements");
+                Assert(line.Columns.Count==3 && line.Columns[0] is DataGridTemplateColumn && ((CategoryOption)line.Items[0]).Count==3117,"Category tables include a checkbox before category name and count");
+                Assert(((TabItem)tabs.Items[0]).Header.ToString().Contains("(2)"),"Group counts represent categories");
+                main.Width=900;main.Height=540;main.UpdateLayout();main.Dispatcher.Invoke(new Action(()=>{}),DispatcherPriority.ContextIdle);main.UpdateLayout();
+                var workflow=Descendants(main).OfType<TabControl>().Single(t=>t.Name=="WorkflowTabs");
+                var sourceSurface=(FrameworkElement)((TabItem)workflow.Items[0]).Content;
+                var linkBox=Descendants(main).OfType<ComboBox>().Single(c=>Equals(c.Tag,"Select IFC link..."));
+                var frame=(FrameworkElement)main.Content;
+                var next=Descendants(main).OfType<Button>().Single(b=>Equals(b.Content,"Continue →"));
+                Assert(linkBox.TransformToAncestor(sourceSurface).Transform(new Point()).Y>=0 && linkBox.IsVisible,"Link picker remains visible at minimum window height");
+                Assert(line.ActualHeight>=65 && line.TransformToAncestor(sourceSurface).Transform(new Point(0,line.ActualHeight)).Y<=sourceSurface.ActualHeight+1,"Category list uses available height without extending outside Source");
+                Assert(next.TransformToAncestor(frame).Transform(new Point(0,next.ActualHeight)).Y<=frame.ActualHeight+1,"Continue remains inside the window at minimum height");
+                ((System.Windows.Data.ListCollectionView)line.ItemsSource).SortDescriptions.Clear();
+                ((System.Windows.Data.ListCollectionView)line.ItemsSource).SortDescriptions.Add(new System.ComponentModel.SortDescription("Count",System.ComponentModel.ListSortDirection.Ascending));
+                Assert(((CategoryOption)line.Items[0]).Name=="Pipes","Category element counts sort numerically");
+                var search=Descendants(main).OfType<TextBox>().Single(t=>t.Name=="SourceCategorySearch");search.Text="Duct";
+                Assert(line.Items.Count==1 && family.Items.Count==1,"Category name filter applies to both category groups");
+                ((CategoryOption)line.Items[0]).IsChecked=true;
+                Assert(next.IsEnabled,"Checking a category enables Continue");
+                search.Text="Pipe";
+                Assert(next.IsEnabled && main.Categories.Single(c=>c.Id==duct).IsChecked,"Filtered-out category checks remain selected");
+                search.Text="";tabs.SelectedIndex=1;((CategoryOption)family.Items[0]).IsChecked=true;
+                Assert(main.Categories.Count(c=>c.IsChecked)==2,"Line and Family categories can be checked together");
+                next.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Assert(loads==1 && main.ReviewCategories.Count==2 && main.SelectedCategory.Id==duct && main.AirTerminals.All(r=>!r.IsSelected),"All checked categories reach Step 2, starting with a line category");
+                main.AirTerminals[0].IsSelected=true;
+                var panel=((TabItem)workflow.Items[2]).Content;
+                var pairs=(System.Collections.IList)panel.GetType().GetField("mappings",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(panel);
+                pairs.Add(new IfcParameterMapping{Source="IFC Element ID",Target="Duct ID"});
+                Descendants(main).OfType<ComboBox>().Single(c=>c.Name=="ReviewCategoryPicker").SelectedItem=main.ReviewCategories.Single(c=>c.Id==fitting);
+                Assert(main.SelectedCategory.Id==fitting && !main.CanCreateDucts && main.AirTerminals.All(r=>!r.IsSelected),"Switching review category routes to the family builder without leaking element checks");
+                main.AirTerminals[0].IsSelected=true;pairs.Add(new IfcParameterMapping{Source="IFC Element ID"});
+                Descendants(main).OfType<ComboBox>().Single(c=>c.Name=="ReviewCategoryPicker").SelectedItem=main.ReviewCategories.Single(c=>c.Id==duct);
+                Assert(main.AirTerminals.Single(r=>r.IsSelected).ElementId=="10" && pairs.Cast<IfcParameterMapping>().Any(m=>m.Target=="Duct ID"),"Switching back restores duct element checks and parameter mappings");
+                Descendants(main).OfType<ComboBox>().Single(c=>c.Name=="ReviewCategoryPicker").SelectedItem=main.ReviewCategories.Single(c=>c.Id==fitting);
+                Assert(main.AirTerminals.Single(r=>r.IsSelected).ElementId=="20" && pairs.Cast<IfcParameterMapping>().Any(m=>m.Source=="IFC Element ID" && m.Target==null),"Family checks and unfinished mapping rows are kept separately");
+                savedSession=main.ExportReviewSession();
+            }
+            catch(Exception ex){failure=ex;}
+            finally{main.Close();}
+        }),DispatcherPriority.ApplicationIdle);
+        main.ShowDialog();if(failure!=null)throw failure;
+        var resumed=new IFCInfoWindow{Links=new List<LinkOption>{new LinkOption{Id=1,Name="Browser.ifc",IsLoaded=true}},InitialLinkId=1,InitialCategoryId=fitting,InitialReview=savedSession,Opacity=0,ShowInTaskbar=false};configure(resumed);
+        resumed.Loaded+=(s,e)=>resumed.Dispatcher.BeginInvoke(new Action(()=> {
+            try{Assert(resumed.ReviewCategories.Count==2 && resumed.SelectedCategory.Id==fitting && resumed.AirTerminals.Single(r=>r.IsSelected).ElementId=="20","Reopened sessions retain the checked category queue and active element checks");}
+            catch(Exception ex){failure=ex;}finally{resumed.Close();}
+        }),DispatcherPriority.ApplicationIdle);
+        resumed.ShowDialog();if(failure!=null)throw failure;
+    }
+    private static void TestBulkParameterCreation()
+    {
+        var csv=ParameterCsv.Read("\uFEFFIFCProperty,ParameterName,DataType\r\n\"Type | Set, A | Code\",\"Code \"\"A\"\"\",Text\r\n,Standalone,Integer\r\n");
+        Assert(csv.Count==2 && csv[0].IFCProperty=="Type | Set, A | Code" && csv[0].ParameterName=="Code \"A\"","CSV supports BOM, commas and escaped quotes");
+        Assert(ParameterCsv.Read("IFCProperty,ParameterName\nIFC GUID,Guid")[0].DataType=="","CSV data type is optional when inferred from IFC");
+        foreach(var invalid in new[]{"Source,Target\na,b","IFCProperty,ParameterName\n\"unclosed,x","IFCProperty,ParameterName\na,b,c","IFCProperty,ParameterName,ParameterName\na,b,c"})
+        {
+            bool failed=false;try{ParameterCsv.Read(invalid);}catch(FormatException){failed=true;}
+            Assert(failed,"Invalid CSV must fail before opening a creation preview");
+        }
+        var row=new AirTerminalRow{ElementId="123",IfcGuid="guid",IsSelected=true,IfcProperties=new List<IfcPropertyValue>{
+            new IfcPropertyValue{Scope="Type",SetName="Pset",Name="FamilyName",Value="Duct",DataType="IFCLABEL"},
+            new IfcPropertyValue{Scope="Instance",SetName="Pset",Name="Unknown",Value="?"}}};
+        var textType=new ParameterOption{Id="autodesk.spec:spec.string-2.0.0",Name="Text",DataKind="text",Discipline="Common"};
+        var integerType=new ParameterOption{Id="Integer",Name="Integer",DataKind="integer",Discipline="Common"};
+        var catalog=new List<ParameterOption>();int created=0;
+        var main=new IFCInfoWindow{AirTerminals=new List<AirTerminalRow>{row},
+            ParameterTypes=()=>new List<ParameterOption>{textType,integerType},ProjectParameters=()=>catalog,
+            LoadParameterTargets=()=>catalog.Select(p=>p.Name).ToList(),CheckParameterTarget=n=>catalog.Any(p=>p.Name==n)?"Ready":"Missing"};
+        main.CreateParameter=(name,type,group,binding)=>{created++;catalog.Add(new ParameterOption{Name=name,Id=type,DataKind=type==integerType.Id?"integer":"text",Binding=binding,Discipline=type==integerType.Id?"Integer":"Text"});};
+        var tabs=Descendants(main).OfType<TabControl>().Single(t=>t.Name=="WorkflowTabs");
+        var panel=((TabItem)tabs.Items[2]).Content;
+        var build=panel.GetType().GetMethod("BuildBulkParameterDialog",BindingFlags.NonPublic|BindingFlags.Instance);
+        var preview=(Window)build.Invoke(panel,new object[]{null});
+        var table=Descendants(preview).OfType<DataGrid>().Single(t=>t.Name=="BulkIfcParameters");
+        var plans=table.Items.Cast<object>().ToList();
+        Func<object,string,object> value=(p,n)=>p.GetType().GetProperty(n).GetValue(p);
+        Assert(plans.Count==4 && plans.Count(p=>(bool)value(p,"Include"))==3,"Bulk preview infers known IFC types and excludes unknown types");
+        var family=plans.Single(p=>(string)value(p,"Name")=="FamilyName");
+        Assert((string)value(family,"TypeId")==textType.Id,"Real Revit Text spec ID resolves from data kind rather than a name substring");
+        var single=(Window)panel.GetType().GetMethod("BuildParameterDialog",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(panel,null);
+        Descendants(single).OfType<ComboBox>().Single(c=>c.Name=="ParameterCreationMode").SelectedIndex=1;
+        Descendants(single).OfType<ComboBox>().Single(c=>c.Name=="CreationIfcProperty").SelectedItem=IfcParameterMapping.Key(row.IfcProperties[0]);
+        Assert(((ParameterOption)Descendants(single).OfType<ComboBox>().Single(c=>c.Name=="CreatedParameterType").SelectedItem)?.Id==textType.Id,"Single Follow IFC creation also recognizes the real Revit Text spec ID");
+        single.Close();
+        var submit=Descendants(preview).OfType<Button>().Single(b=>Equals(b.Content,"Create selected"));
+        submit.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var mappings=(System.Collections.IList)panel.GetType().GetField("mappings",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(panel);
+        Assert(created==3 && mappings.Cast<IfcParameterMapping>().Count(m=>!string.IsNullOrWhiteSpace(m.Target))==3,"Bulk creation creates and maps selected IFC properties");
+        var request=new DuctRequest{Items=new List<DuctPlanItem>{new DuctPlanItem{Source=row}}};
+        Assert((bool)panel.GetType().GetMethod("Validate",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(panel,new object[]{request}) && request.ParameterMappings.Count==3,"Bulk-created parameters enter the duct request");
+        Descendants(preview).OfType<Button>().Single(b=>Equals(b.Content,"Select all")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(plans.All(p=>!(bool)value(p,"Include")),"Select all does not repeat completed creations or select unknown data types");
+        preview.Close();
+        var imported=ParameterCsv.Read("IFCProperty,ParameterName,DataType\nIFC GUID,IFC GUID,Text\n,Standalone,Integer");
+        preview=(Window)build.Invoke(panel,new object[]{imported});
+        Descendants(preview).OfType<Button>().Single(b=>Equals(b.Content,"Create selected")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(created==4 && catalog.Any(p=>p.Name=="Standalone"),"CSV reuses an existing compatible target and creates an unmapped standalone parameter");
+        preview.Close();
+        preview=(Window)build.Invoke(panel,new object[]{new List<ParameterCsv.Row>{new ParameterCsv.Row{IFCProperty="IFC GUID",ParameterName="Conflict"},new ParameterCsv.Row{IFCProperty="IFC Element ID",ParameterName="Conflict"}}});
+        table=Descendants(preview).OfType<DataGrid>().Single();
+        Assert(table.Items.Cast<object>().All(p=>!(bool)value(p,"Include")),"Duplicate target names start unchecked for review");
+        Descendants(preview).OfType<Button>().Single(b=>Equals(b.Content,"Select all")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Descendants(preview).OfType<Button>().Single(b=>Equals(b.Content,"Create selected")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(created==4,"Duplicate CSV targets are rejected before creating any parameters");
+        preview.Close();
+        preview=(Window)build.Invoke(panel,new object[]{new List<ParameterCsv.Row>{
+            new ParameterCsv.Row{IFCProperty="IFC GUID",ParameterName="Wrong type",DataType="Integer"},
+            new ParameterCsv.Row{IFCProperty="Not in selected IFC",ParameterName="Wrong source",DataType="Text"}}});
+        table=Descendants(preview).OfType<DataGrid>().Single();
+        Assert(table.Items.Cast<object>().All(p=>!(bool)value(p,"Include")),"CSV mismatches and unknown sources are excluded from automatic creation");
+        foreach(var item in table.Items.Cast<object>())item.GetType().GetProperty("Include").SetValue(item,true);
+        Descendants(preview).OfType<Button>().Single(b=>Equals(b.Content,"Create selected")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(created==4,"Manually selecting invalid CSV rows cannot bypass data type and source checks");
+        preview.Close();main.Close();
+    }
     private static void TestParameterMapping()
     {
         var suggest=typeof(IFCInfoWindow).Assembly.GetType("IFCInfo.ParameterMappingPanel").GetMethod("SuggestedType",BindingFlags.Static|BindingFlags.NonPublic);
@@ -36,6 +249,8 @@ internal static class Program
         var panel=tabs.Items.Cast<TabItem>().Single(t=>Equals(t.Header,"Parameters")).Content;
         var mappings=(System.Collections.IList)panel.GetType().GetField("mappings",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(panel);
         var validate=panel.GetType().GetMethod("Validate",BindingFlags.NonPublic|BindingFlags.Instance);
+        var validateNext=panel.GetType().GetMethod("ValidateNext",BindingFlags.NonPublic|BindingFlags.Instance);
+        Assert((bool)validateNext.Invoke(panel,null),"Default blank parameter row must allow continuing without parameters");
         var mapping=new IfcParameterMapping {Source="Length",Target="IFC Length"};mappings.Add(mapping);
         var request=new DuctRequest {Items=new List<DuctPlanItem>{new DuctPlanItem {Source=row}}};
         Assert(!(bool)validate.Invoke(panel,new object[]{request}),"Missing target requires create choice");
@@ -114,6 +329,25 @@ internal static class Program
         Assert(typed.Target==null,"Changing IFC type clears incompatible selected target");
         filtered=(List<string>)available.Invoke(panel,new object[]{typed,"Target",new[]{"ID Integer","ID Text","Distance"}});
         Assert(filtered.SequenceEqual(new[]{"ID Text"}),"GUID offers Text targets and excludes numeric types");
+        var addDialog=(Window)panel.GetType().GetMethod("BuildAddParametersDialog",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(panel,null);
+        var addList=Descendants(addDialog).OfType<ListBox>().Single(x=>x.Name=="AvailableIfcParameters");
+        var addSelected=Descendants(addDialog).OfType<Button>().Single(b=>Equals(b.Content,"Add selected parameters"));
+        Assert(!addSelected.IsEnabled && !addList.Items.Contains("IFC GUID"),"Parameter picker excludes already used properties and disables empty submission");
+        Descendants(addDialog).OfType<Button>().Single(b=>Equals(b.Content,"Select all")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        int availableCount=addList.Items.Count;
+        Assert(availableCount>1 && addList.SelectedItems.Count==availableCount && addSelected.IsEnabled,"Select all selects every available IFC property");
+        Descendants(addDialog).OfType<Button>().Single(b=>Equals(b.Content,"Clear selection")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(addList.SelectedItems.Count==0 && !addSelected.IsEnabled,"Clear selection clears the parameter picker");
+        Descendants(addDialog).OfType<Button>().Single(b=>Equals(b.Content,"Select all")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        addSelected.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(mappings.Count==availableCount+1 && mappings.Cast<IfcParameterMapping>().Select(m=>m.Source).Distinct().Count()==mappings.Count,"Adding all parameters preserves existing rows without duplicate properties");
+        Assert((bool)validateNext.Invoke(panel,null) && (bool)validate.Invoke(panel,new object[]{request}) && request.ParameterMappings.Count==0,"Bulk-added source-only parameters do not block creation or transfer values");
+        Assert(status.Text.Contains("will be skipped") && !status.Text.Contains("Row 1:"),"Draft rows display one informative summary instead of repeated errors");
+        typed.Target="ID Text";
+        Assert((bool)validate.Invoke(panel,new object[]{request}) && request.ParameterMappings.Count==1 && request.ParameterMappings[0].Source=="IFC GUID","Only complete pairs are transferred alongside unfinished drafts");
+        mappings.Clear();
+        request.ParameterMappings.Add(new IfcParameterMapping {Source="stale",Target="stale"});
+        Assert((bool)validateNext.Invoke(panel,null) && (bool)validate.Invoke(panel,new object[]{request}) && request.ParameterMappings.Count==0,"No parameter rows allow creation and clear stale request mappings");
         window.Close();
     }
 
@@ -135,7 +369,7 @@ internal static class Program
         {
             if (args.Length == 1 && args[0] == "--test")
             {
-                TestParameterMapping(); TestSelection(false);
+                TestExpandedFamilyCategories();TestStep2CategoryColumn();TestSourceBrowser(); TestProductivityTools(); TestBulkParameterCreation(); TestParameterMapping(); TestSelection(false);
                 TestSelection(true);
                 TestResultSelection();
                 TestFamilyLoader();
@@ -171,20 +405,52 @@ internal static class Program
             tabPreview.OpenDuctSettings(tabEditor,r=>{});
             Render(tabPreview,output,"duct-settings-tabs.png",1500,850);
             tabPreview.AirTerminals[0].IfcProperties=new List<IfcPropertyValue> {
-                new IfcPropertyValue {Scope="Instance",SetName="Pset_DuctSegmentCommon",Name="Reference",Value="D-001"},
-                new IfcPropertyValue {Scope="Instance",SetName="Dimensions",Name="Width",Value="500",Unit="mm"}};
+                new IfcPropertyValue {Scope="Instance",SetName="Pset_DuctSegmentCommon",Name="Reference",Value="D-001",DataType="IFCLABEL"},
+                new IfcPropertyValue {Scope="Instance",SetName="Dimensions",Name="Width",Value="500",Unit="mm",DataType="IFCLENGTHMEASURE"}};
             tabPreview.LoadParameterTargets=()=>new List<string>{"IFC Reference","IFC Width"};
             tabPreview.CheckParameterTarget=n=>"Ready";
             ((TabItem)previewTabs.Items[2]).IsSelected=true;
             var parameterBody=((TabItem)previewTabs.Items[2]).Content;
             var previewMappings=(System.Collections.IList)parameterBody.GetType().GetField("mappings",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(parameterBody);
+            parameterBody.GetType().GetMethod("Refresh",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(parameterBody,null);
             previewMappings.Clear();
             previewMappings.Add(new IfcParameterMapping {Source=IfcParameterMapping.Key(tabPreview.AirTerminals[0].IfcProperties[0]),Target="IFC Reference",IsMapped=true});
             previewMappings.Add(new IfcParameterMapping {Source=IfcParameterMapping.Key(tabPreview.AirTerminals[0].IfcProperties[1]),Target="IFC Width"});
+            parameterBody.GetType().GetMethod("Validate",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(parameterBody,new object[]{null});
             Render(tabPreview,output,"parameters.png",1500,850);
+            tabPreview.PreviewParameters=(rows,maps)=>new List<ParameterValuePreview>{new ParameterValuePreview{SourceId="304421",TargetId="600101",IFCProperty="Instance | Pset_DuctSegmentCommon | Reference",RevitParameter="IFC Reference",CurrentValue="D-000",ProposedValue="D-001",Status="Ready to update existing duct"}};
+            var valuePreview=(Window)parameterBody.GetType().GetMethod("BuildValuePreview",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(parameterBody,null);
+            Render(valuePreview,output,"parameter-values.png",1150,600);valuePreview.Close();
+            var bulkPreview=(Window)parameterBody.GetType().GetMethod("BuildBulkParameterDialog",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(parameterBody,new object[]{null});
+            Render(bulkPreview,output,"bulk-parameters.png",1050,650);bulkPreview.Close();
             tabPreview.Close();tabEditor.Close();
-            var sourceWindow = new IFCInfoWindow();
-            Render(sourceWindow, output, "ifc-source.png", 1100, 790);
+            var sourceWindow = new IFCInfoWindow{Links=new List<LinkOption>{new LinkOption{Id=1,Name="MEP-model.ifc",IsLoaded=true}},InitialLinkId=1};
+            sourceWindow.LoadLink=link=> {
+                sourceWindow.Categories=new List<CategoryOption>{
+                    new CategoryOption{Id=1,Name="Ducts",Kind="Line",Count=3117},
+                    new CategoryOption{Id=2,Name="Duct Fittings",Kind="Family",Count=2460},
+                    new CategoryOption{Id=3,Name="Pipes",Kind="Line",Count=1250},
+                    new CategoryOption{Id=4,Name="Cable Trays",Kind="Line",Count=96},
+                    new CategoryOption{Id=(long)Autodesk.Revit.DB.BuiltInCategory.OST_MechanicalEquipment,Name="Mechanical Equipment",Kind="Family",Count=24},
+                    new CategoryOption{Id=(long)Autodesk.Revit.DB.BuiltInCategory.OST_DuctTerminal,Name="Air Terminals",Kind="Family",Count=180},
+                    new CategoryOption{Id=(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeFitting,Name="Pipe Fittings",Kind="Family",Count=120},
+                    new CategoryOption{Id=(long)Autodesk.Revit.DB.BuiltInCategory.OST_LightingFixtures,Name="Lighting Fixtures",Kind="Family",Count=86},
+                    new CategoryOption{Id=(long)Autodesk.Revit.DB.BuiltInCategory.OST_GenericModel,Name="Generic Models",Kind="Family",Count=16}};
+            };
+            sourceWindow.RaiseEvent(new RoutedEventArgs(FrameworkElement.LoadedEvent));
+            sourceWindow.Categories[0].IsChecked=true;sourceWindow.Categories[1].IsChecked=true;
+            Render(sourceWindow, output, "ifc-source.png", 1300, 850);
+            Render(sourceWindow, output, "ifc-source-short.png",900,540);
+            Render(sourceWindow, output, "ifc-source-wide-short.png",1760,650);
+            var sourceKindTabs=Descendants(sourceWindow).OfType<TabControl>().Single(t=>t.Name=="SourceCategoryKinds");sourceKindTabs.SelectedIndex=1;
+            Render(sourceWindow,output,"ifc-source-family-categories.png",1300,850);sourceKindTabs.SelectedIndex=0;
+            typeof(IFCInfoWindow).GetProperty("ReviewCategories").GetSetMethod(true).Invoke(sourceWindow,new object[]{sourceWindow.Categories.Where(c=>c.IsChecked).ToList()});
+            typeof(IFCInfoWindow).GetProperty("SelectedCategory").GetSetMethod(true).Invoke(sourceWindow,new object[]{sourceWindow.Categories[0]});
+            sourceWindow.CanCreateDucts=true;sourceWindow.AirTerminalCount=2;
+            sourceWindow.AirTerminals=new List<AirTerminalRow>{new AirTerminalRow{ElementId="301206",Name="Round duct",SystemType="LT_Abluft",SystemName="EA-01",IsSelected=true},new AirTerminalRow{ElementId="301207",Name="Rectangular duct",SystemType="Supply Air",SystemName="SA-01"}};
+            var sourceWorkflow=Descendants(sourceWindow).OfType<TabControl>().Single(t=>t.Name=="WorkflowTabs");
+            ((TabItem)sourceWorkflow.Items[1]).Content=new ScrollViewer{Content=(FrameworkElement)typeof(IFCInfoWindow).GetMethod("CountPage",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(sourceWindow,null),VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
+            sourceWorkflow.SelectedIndex=1;Render(sourceWindow,output,"ifc-review-category-queue.png",1300,850);
             sourceWindow.Close();
             foreach(string kind in new[] { "Pipe","CableTray" })
             {
@@ -601,7 +867,8 @@ internal static class Program
             main.OpenDuctSettings(preparedWindow,r=>{});return null;
         };
         Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Next: Create Ducts →").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                Assert(tabs.SelectedItem==tabs.Items[2] && preparedWindow==null,"Next remains in Parameters when the target is missing");
+        Assert(tabs.SelectedItem==settingsTab && preparedWindow!=null,"Next opens duct settings when draft rows have no Revit target");
+        tabs.SelectedItem=tabs.Items[2];
         main.CheckParameterTarget=n=>"Ready";
         var required=(IfcParameterMapping)pairs[pairs.Count-1];required.Target="Target";required.Source="IFC Element ID";
         Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Next: Create Ducts →").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -609,7 +876,15 @@ internal static class Program
         required.Target=null;
         bool executed=false;main.RunDuctCreation=()=>executed=true;
         typeof(IFCInfoWindow).GetMethod("SubmitDuctRequest",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(main,new object[]{new DuctRequest{Items=new List<DuctPlanItem>{Item("456",false,"Supply Air","Level 1")}}});
-        Assert(!executed && tabs.SelectedItem==tabs.Items[2],"Actual creation returns to Parameters and blocks incomplete pairs");
+        Assert(executed,"Actual creation skips incomplete pairs instead of blocking ducts");
+        executed=false;
+        pairs.Clear();
+        tabs.SelectedItem=tabs.Items[2];
+        Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Next: Create Ducts →").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(tabs.SelectedItem==settingsTab,"Next opens duct settings without adding parameters");
+        var noParameters=new DuctRequest{Items=new List<DuctPlanItem>{Item("456",false,"Supply Air","Level 1")}};
+        typeof(IFCInfoWindow).GetMethod("SubmitDuctRequest",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(main,new object[]{noParameters});
+        Assert(executed && noParameters.ParameterMappings.Count==0,"Creation callback runs with no optional parameter mappings");
         main.Close();editor.Close();
     }
     private static void TestExports()

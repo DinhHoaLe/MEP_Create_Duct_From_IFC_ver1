@@ -201,13 +201,14 @@ namespace IFCInfo
             tile.Child = path;
             return tile;
         }
-        internal static FrameworkElement Steps(int active, bool fourSteps=false, bool[] ready=null)
+        internal static FrameworkElement Steps(int active, bool fourSteps=false, bool[] ready=null, string[] labelsOverride=null)
         {
-            var grid = new Grid { Width = fourSteps?450:340, VerticalAlignment = VerticalAlignment.Center };
-            for (int i = 0; i < (fourSteps?7:5); i++)
-                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(i % 2 == 0 ? 90 : 35) });
             var labels = new[] { "Select link\nand category", "Select elements\nand type", "Create and finish" };
             if(fourSteps)labels=new[]{"Source","Elements","Parameters","Create\nDucts"};
+            if(labelsOverride!=null && labelsOverride.Length>0)labels=labelsOverride;
+            var grid = new Grid { Width = labelsOverride==null?(fourSteps?450:340):labels.Length*90+(labels.Length-1)*35, VerticalAlignment = VerticalAlignment.Center };
+            for (int i = 0; i < labels.Length*2-1; i++)
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(i % 2 == 0 ? 90 : 35) });
             for (int i = 0; i < labels.Length; i++)
             {
                 bool current = i + 1 == active;

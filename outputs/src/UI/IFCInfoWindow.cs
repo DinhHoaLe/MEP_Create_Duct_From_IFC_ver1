@@ -14,10 +14,20 @@ namespace IFCInfo
     // Code-only WPF: all UI is contained in the DLL for Add-In Manager Manual.
     public sealed class IFCInfoWindow : Window
     {
+        internal DashboardSelection DashboardChoice {get;set;}
+        internal bool DashboardRequested {get;private set;}
+        private FrameworkElement WorkflowSteps(int active,bool[] ready=null)
+        {
+            string[] labels=DashboardChoice==null?null:DashboardChoice.IsReview?new[]{"Source","Elements"}:
+                DashboardChoice.IsTransfer?new[]{"Source","Elements","Parameters"}:
+                new[]{"Source","Elements","Parameters",DashboardChoice.IsUpdate?"Update\nDucts":DashboardChoice.Kind=="Family"?"Placement":"Create"};
+            return UiDesign.Steps(active,true,ready,labels);
+        }
         public Action RunDuctCreation {get;set;}
         private bool creationBusy;
         private void SubmitDuctRequest(DuctRequest request)
         {
+            if(DashboardChoice?.IsReview==true || DashboardChoice?.IsTransfer==true)return;
             if(creationBusy)return;
             if(!parameterPanel.Validate(request)){workflowTabs.SelectedItem=parametersTab;return;}
             DuctCreationRequest=request;
@@ -41,10 +51,48 @@ namespace IFCInfo
         public Func<string,string> CheckParameterTarget {get;set;}
         public Func<List<string>> LoadParameterTargets {get;set;}
         public Func<List<AirTerminalRow>,List<IfcParameterMapping>,string> TransferParameters {get;set;}
+        public Func<List<AirTerminalRow>,List<IfcParameterMapping>,List<ParameterValuePreview>> PreviewParameters {get;set;}
         private List<AirTerminalRow> parameterSelection=new List<AirTerminalRow>();
         private string settingsSelection;
         private DuctCreationWindow embeddedSettings;
-        private string SelectionKey() => string.Join("|",AirTerminals.Where(r=>r.IsSelected && r.CanSelect).Select(r=>r.ElementId).OrderBy(id=>id));
+        public CategoryReviewSession InitialReview {get;set;}
+        public List<CategoryOption> ReviewCategories {get;private set;}=new List<CategoryOption>();
+        private readonly Dictionary<long,List<string>> reviewChecks=new Dictionary<long,List<string>>();
+        private readonly Dictionary<long,List<IfcParameterMapping>> reviewMappings=new Dictionary<long,List<IfcParameterMapping>>();
+        private Action refreshReviewHeader;
+        private void RememberReview()
+        {
+            if(SelectedCategory==null)return;
+            reviewChecks[SelectedCategory.Id]=AirTerminals.Where(r=>r.IsSelected).Select(r=>r.ElementId).ToList();
+            reviewMappings[SelectedCategory.Id]=parameterPanel.CaptureRows();
+        }
+        public CategoryReviewSession ExportReviewSession()
+        {
+            RememberReview();
+            return new CategoryReviewSession{LinkId=SelectedLink?.Id,CategoryIds=ReviewCategories.Select(c=>c.Id).ToList(),
+                CheckedElements=reviewChecks.ToDictionary(p=>p.Key,p=>p.Value.ToList()),Mappings=reviewMappings.ToDictionary(p=>p.Key,p=>ParameterMappingPanel.CopyRows(p.Value))};
+        }
+        private void OpenReviewCategory(CategoryOption category)
+        {
+            RememberReview();
+            var oldCategory=SelectedCategory;var oldRows=AirTerminals;var oldCount=AirTerminalCount;var oldError=AirTerminalError;bool oldDuct=CanCreateDucts,oldReplace=CanReplaceCategory;
+            try
+            {
+                SelectedCategory=category;
+                using(LoadingWindow.ShowWhile(this,"Reading IFC data","Reading the selected category and comparing Revit elements…"))LoadCategory(category);
+                if(reviewChecks.TryGetValue(category.Id,out var checks))foreach(var row in AirTerminals)row.IsSelected=checks.Contains(row.ElementId);
+            }
+            catch
+            {
+                SelectedCategory=oldCategory;AirTerminals=oldRows;AirTerminalCount=oldCount;AirTerminalError=oldError;CanCreateDucts=oldDuct;CanReplaceCategory=oldReplace;throw;
+            }
+            parameterSelection.Clear();
+            parameterPanel.RestoreRows(reviewMappings.TryGetValue(category.Id,out var maps)?maps:new List<IfcParameterMapping>());
+            settingsTab.Content=null;settingsSelection=null;embeddedSettings?.Close();embeddedSettings=null;
+            elementsTab.Content=new ScrollViewer{Content=CountPage(),VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
+            refreshReviewHeader?.Invoke();workflowTabs.SelectedItem=elementsTab;
+        }
+        private string SelectionKey() => string.Join("|",(DashboardChoice?.IsUpdate==true?parameterSelection.Where(r=>AirTerminals.Contains(r)):AirTerminals.Where(r=>r.IsSelected && r.CanSelect)).Select(r=>r.ElementId).OrderBy(id=>id));
         internal static Style SelectionHeaderStyle(Style basis)
         {
             var style=new Style(typeof(System.Windows.Controls.Primitives.DataGridColumnHeader),basis);
@@ -199,7 +247,7 @@ namespace IFCInfo
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(112) });
             header.ColumnDefinitions.Add(new ColumnDefinition());
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            header.Children.Add(UiDesign.Logo());
+            var logo=UiDesign.Logo();header.Children.Add(logo);
             var titles = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(titles, 1);
             header.Children.Add(titles);
@@ -209,10 +257,10 @@ namespace IFCInfo
             subtitle.Margin = new Thickness(0, 8, 0, 0);
             titles.Children.Add(heading);
             titles.Children.Add(subtitle);
-            var progress = new ContentControl { Content = UiDesign.Steps(1,true), Margin = new Thickness(20, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+            var progress = new ContentControl { Content = WorkflowSteps(1), Margin = new Thickness(20, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(progress, 2);
             header.Children.Add(progress);
-            header.SizeChanged += (s, e) => progress.Visibility = header.ActualWidth < 960 ? Visibility.Collapsed : Visibility.Visible;
+            header.SizeChanged += (s, e) => progress.Visibility = header.ActualWidth < 960 || root.ActualHeight<650 ? Visibility.Collapsed : Visibility.Visible;
             DockPanel.SetDock(header, Dock.Top);
             root.Children.Add(header);
             var footer = new Grid { Margin = new Thickness(38, 20, 38, 26) };
@@ -224,7 +272,7 @@ namespace IFCInfo
             DockPanel.SetDock(footer, Dock.Bottom);
             root.Children.Add(footer);
             var status = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 8, 16, 8) };
-            feedback = Text("Select an IFC link and category to continue.", 14, "#716B63");
+            feedback = Text("Select an IFC link, then choose a category to continue.", 14, "#716B63");
             feedback.MaxWidth = 310;
             status.Children.Add(feedback);
             Grid.SetColumn(status, 1);
@@ -245,6 +293,11 @@ namespace IFCInfo
             var back = Button("← Back", false);
             back.Visibility = Visibility.Collapsed;
             leftButtons.Children.Add(back);
+            var dashboardButton=Button("← Dashboard",false);
+            dashboardButton.Name="ReturnToDashboard";
+            dashboardButton.Visibility=Visibility.Collapsed;
+            dashboardButton.Click+=(s,e)=> {if(creationBusy)return;DashboardRequested=true;Close();};
+            leftButtons.Children.Add(dashboardButton);
             zoomSource=IconButton("Zoom to IFC source",
                 "M10,3 A7,7 0 1 0 10,17 A7,7 0 1 0 10,3 M15,15 L21,21 M10,7 L10,13 M7,10 L13,10");
             zoomSource.Visibility=Visibility.Collapsed; zoomSource.IsEnabled=false;
@@ -255,9 +308,10 @@ namespace IFCInfo
             var create = Button("Create family →", true);
             create.Visibility = Visibility.Collapsed;
             buttons.Children.Add(create);
-            var body = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
-            var card = new StackPanel { Margin = new Thickness(34, 25, 34, 32) };
-            body.Children.Add(new Border
+            var card = new Grid { Margin = new Thickness(22, 16, 22, 20) };
+            card.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});card.RowDefinitions.Add(new RowDefinition{Height=new GridLength(1,GridUnitType.Star)});
+            var sourceFields=new StackPanel();card.Children.Add(sourceFields);
+            var sourceSurface=new Border
             {
                 Child = card,
                 Background = Brushes.White,
@@ -265,28 +319,39 @@ namespace IFCInfo
                 BorderBrush = Brush("#DDD6CE"),
                 BorderThickness = new Thickness(1),
                 Effect = UiDesign.Shadow()
-            });
-            var sourceTitle = Text("Source information", 22, "#37322B");
+            };
+            var sourceTitle = Text("Source categories", 22, "#37322B");
             sourceTitle.FontWeight = FontWeights.SemiBold;
-            card.Children.Add(sourceTitle);
-            var description = Text("Select an IFC link and source category, then choose the target category / type in Revit.", 15, "#716B63");
+            sourceFields.Children.Add(sourceTitle);
+            var description = Text("Choose a link and check one or more Line / Family categories. Review elements by category in the next step.", 15, "#716B63");
             description.Margin = new Thickness(0, 8, 0, 0);
-            card.Children.Add(description);
-            var linkBox = UiDesign.Field(card, "IFC link", "Select the source IFC model link", "Select IFC link...", false);
-            var categoryBox = UiDesign.Field(card, "Source category", "Categories containing elements in the IFC link", "Select category...", true);
-            categoryBox.IsEnabled = false;
-            var scroll = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            sourceFields.Children.Add(description);
+            var linkBox = UiDesign.Field(sourceFields, "IFC link", "Select the source IFC model link", "Select IFC link...", false,true);
+            var sourceBrowser=new SourceCategoryBrowser();Grid.SetRow(sourceBrowser,1);card.Children.Add(sourceBrowser);
+            sourceBrowser.SelectionChanged+=()=>next.IsEnabled=sourceBrowser.Selected.Count>0;
+            root.SizeChanged+=(s,e)=> {
+                bool compact=root.ActualHeight<650;
+                sourceTitle.Visibility=description.Visibility=compact?Visibility.Collapsed:Visibility.Visible;
+                header.Margin=compact?new Thickness(20,6,20,6):new Thickness(28,20,28,12);
+                logo.Width=compact?54:100;logo.Height=compact?50:94;header.ColumnDefinitions[0].Width=new GridLength(compact?68:112);
+                heading.FontSize=compact?22:30;subtitle.Visibility=compact?Visibility.Collapsed:Visibility.Visible;
+                progress.Visibility=compact || header.ActualWidth<960?Visibility.Collapsed:Visibility.Visible;
+                footer.Margin=compact?new Thickness(20,6,20,10):new Thickness(38,20,38,26);
+                card.Margin=compact?new Thickness(16,8,16,10):new Thickness(22,16,22,20);
+                sourceBrowser.SetCompact(compact);
+            };
             workflowTabs=new TabControl {Name="WorkflowTabs",Background=Background,BorderThickness=new Thickness(0),Margin=new Thickness(20,4,20,0)};
-            sourceTab=new TabItem {Header="Source",Content=scroll,Padding=new Thickness(20,10,20,10)};
+            sourceTab=new TabItem {Header="Source",Content=sourceSurface,Padding=new Thickness(20,10,20,10)};
             elementsTab=new TabItem {Header="Elements",IsEnabled=true,Padding=new Thickness(20,10,20,10)};
             settingsTab=new TabItem {Header="Create Ducts",IsEnabled=true,Padding=new Thickness(20,10,20,10)};
             UiDesign.StyleWorkflowTabs(workflowTabs);
             workflowTabs.Items.Add(sourceTab);workflowTabs.Items.Add(elementsTab);
-            parameterPanel=new ParameterMappingPanel {Sources=()=>AirTerminals.Where(r=>r.IsSelected && r.CanSelect).ToList(),
+            parameterPanel=new ParameterMappingPanel {Sources=()=>{if(DashboardChoice?.IsUpdate==true || DashboardChoice?.IsTransfer==true)return parameterSelection.Where(r=>AirTerminals.Contains(r)).ToList();var checkedRows=AirTerminals.Where(r=>r.IsSelected && r.CanSelect).ToList();return checkedRows.Count>0?checkedRows:parameterSelection.Where(r=>AirTerminals.Contains(r)).ToList();},
                 SelectedSources=()=>parameterSelection.Where(r=>AirTerminals.Contains(r)).ToList(),
                 Targets=()=>LoadParameterTargets?.Invoke()??new List<string>(), Types=()=>ParameterTypes?.Invoke()??new List<ParameterOption>(), Groups=()=>ParameterGroups?.Invoke()??new List<ParameterOption>(), Catalog=()=>ProjectParameters?.Invoke()??new List<ParameterOption>(),
                 CreateParameter=(name,type,group,binding)=> {if(CreateParameter==null)throw new InvalidOperationException("Select an IFC source and Ducts category first.");CreateParameter(name,type,group,binding);},
                 Transfer=(rows,maps)=>TransferParameters?.Invoke(rows,maps)??"Transfer unavailable for this category.",
+                Preview=(rows,maps)=>PreviewParameters?.Invoke(rows,maps)??new List<ParameterValuePreview>(),
                 CheckTarget=name=>CheckParameterTarget?.Invoke(name)??"Catalog unavailable"};
             parametersTab=new TabItem {Header="Parameters",Content=parameterPanel};
             workflowTabs.Items.Add(parametersTab);workflowTabs.Items.Add(settingsTab);
@@ -295,34 +360,64 @@ namespace IFCInfo
             {
                 if(e.Source!=workflowTabs)return;
                 bool parameters=workflowTabs.SelectedItem==parametersTab;
-                if(parameters)parameterPanel.Refresh();
+                if(parameters){parameterPanel.Refresh();parameterPanel.IsEnabled=CanCreateDucts || SelectedCategory==null;}
                 bool source=workflowTabs.SelectedItem==sourceTab;
                 bool settings=workflowTabs.SelectedItem==settingsTab;
                 footer.Visibility=settings?Visibility.Collapsed:Visibility.Visible;
                 next.Visibility=source?Visibility.Visible:Visibility.Collapsed;
                 back.Visibility=source||settings?Visibility.Collapsed:Visibility.Visible;
                 create.Visibility=!source&&!settings?Visibility.Visible:Visibility.Collapsed;
-                create.Content=parameters?"Next: Create Ducts →":"Next: Parameters →";
+                create.Content=parameters?(CanCreateDucts?"Next: Create Ducts →":"Next: Placement →"):"Next: Parameters →";
+                if(DashboardChoice?.IsUpdate==true && parameters)create.Content="Next: Update Ducts →";
+                if(DashboardChoice?.IsTransfer==true && parameters)create.Content="Transfer values";
+                if(DashboardChoice?.IsReview==true)create.Visibility=Visibility.Collapsed;
                 heading.Text=parameters?"Parameters":source?"Select link and category":settings?"Create Ducts":SelectedCategory?.Name??"Elements";
-                subtitle.Text=parameters?"Choose properties for the checked IFC elements":source?"Select an IFC source":settings?"Configure selected ducts":"Review IFC elements";
-                progress.Content=UiDesign.Steps(source?1:settings?4:parameters?3:2,true,new[]{SelectedCategory!=null && AirTerminals.Count>0,AirTerminals.Any(r=>r.IsSelected && r.CanSelect),SelectedCategory!=null && parameterPanel.Ready,false});
+                if(settings && DashboardChoice?.IsUpdate==true)heading.Text="Update Ducts";
+                subtitle.Text=parameters?(CanCreateDucts || SelectedCategory==null?"Optional: choose properties for the checked IFC elements, or continue without parameters":"Parameter mapping applies to ducts. Continue to configure placement for "+SelectedCategory.Name+"."):source?"Select an IFC source":settings?"Configure selected ducts":"Review IFC elements";
+                if(parameters && (DashboardChoice?.IsTransfer==true || DashboardChoice?.IsUpdate==true))
+                    subtitle.Text=DashboardChoice.IsTransfer?"Map IFC properties for highlighted source rows, then click Transfer values.":"Optional: configure parameters for the highlighted ducts before reviewing updates.";
+                progress.Content=WorkflowSteps(source?1:settings?4:parameters?3:2,new[]{SelectedCategory!=null && AirTerminals.Count>0,DashboardChoice?.IsUpdate==true || DashboardChoice?.IsTransfer==true?parameterSelection.Any(r=>AirTerminals.Contains(r)):AirTerminals.Any(r=>r.IsSelected && r.CanSelect),SelectedCategory!=null && parameterPanel.Ready,false});
                 if(workflowTabs.SelectedItem==elementsTab && elementsTab.Content==null) elementsTab.Content=new ScrollViewer {Content=CountPage(),VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
                 if(settings && (settingsTab.Content==null || settingsSelection!=SelectionKey() || embeddedSettings==null))
                 {
                     settingsTab.Content=null;
-                    if(CanCreateDucts && AirTerminals.Any(r=>r.IsSelected && r.CanSelect))create.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                    if(DashboardChoice?.IsUpdate==true && !parameterSelection.Any(r=>AirTerminals.Contains(r)))
+                    {
+                        feedback.Text="Highlight source rows in Elements before reviewing updates.";
+                        workflowTabs.SelectedItem=elementsTab;return;
+                    }
+                    if(CanCreateDucts && (DashboardChoice?.IsUpdate==true || AirTerminals.Any(r=>r.IsSelected && r.CanSelect)))create.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
                     if(settingsTab.Content==null)settingsTab.Content=EmptyDuctSettings();
                 }
             };
             Loaded += (s, e) =>
             {
+                sourceBrowser.KindFilter=DashboardChoice?.Kind;
+                progress.Content=WorkflowSteps(1);
+                dashboardButton.Visibility=DashboardChoice==null?Visibility.Collapsed:Visibility.Visible;
+                if(DashboardChoice!=null)
+                {
+                    Title="IFC to Revit — "+DashboardChoice.Summary;
+                    description.Text="Choose a link and check "+(DashboardChoice.Kind=="Family"?"Family Instance":"Line")+" categories for "+DashboardChoice.Task+".";
+                    if(DashboardChoice.IsUpdate)settingsTab.Header="Update Ducts";
+                    if(DashboardChoice.IsTransfer)settingsTab.Visibility=Visibility.Collapsed;
+                    if(DashboardChoice.IsReview){parametersTab.IsEnabled=false;settingsTab.IsEnabled=false;}
+                }
                 linkBox.ItemsSource = Links;
-                feedback.Text = Links.Count == 0 ? "No IFC link was found. Link an IFC model, then reopen the tool." : "Select an IFC link and category.";
+                feedback.Text = Links.Count == 0 ? "No IFC link was found. Link an IFC model, then reopen the tool." : "Select an IFC link to browse elements.";
                 if (InitialLinkId.HasValue)
                 {
                     linkBox.SelectedItem = Links.FirstOrDefault(link => link.Id == InitialLinkId.Value);
                     if (InitialCategoryId.HasValue)
-                        categoryBox.SelectedItem = Categories.FirstOrDefault(category => category.Id == InitialCategoryId.Value);
+                    {
+                        sourceBrowser.SelectCategory(InitialCategoryId.Value);
+                    }
+                    if(InitialReview!=null && InitialReview.LinkId==SelectedLink?.Id)
+                    {
+                        foreach(var category in Categories)category.IsChecked=InitialReview.CategoryIds.Contains(category.Id);
+                        foreach(var pair in InitialReview.CheckedElements)reviewChecks[pair.Key]=pair.Value.ToList();
+                        foreach(var pair in InitialReview.Mappings)reviewMappings[pair.Key]=ParameterMappingPanel.CopyRows(pair.Value);
+                    }
                     if (next.IsEnabled)
                         next.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
                 }
@@ -330,21 +425,21 @@ namespace IFCInfo
             linkBox.SelectionChanged += (s, e) =>
             {
                 next.IsEnabled = false;
-                categoryBox.ItemsSource = null;
-                categoryBox.IsEnabled = false;
+                sourceBrowser.SetCategories(new List<CategoryOption>());
                 elementsTab.Content=null; elementsTab.IsEnabled=true;
-                settingsTab.Content=null; settingsTab.IsEnabled=true;
+                settingsTab.Content=null; settingsTab.IsEnabled=DashboardChoice?.IsReview!=true;
                 SelectedLink = linkBox.SelectedItem as LinkOption;
                 SelectedCategory = null;
                 Replacement = null;
                 DuctCreationRequest = null;
                 Categories = new List<CategoryOption>();
+                ReviewCategories.Clear();reviewChecks.Clear();reviewMappings.Clear();
                 AirTerminals = new List<AirTerminalRow>();
                 LoadCategory = null;
                 LoadPreview = null;
                 PrepareDucts = null;
                 parameterSelection.Clear();
-                TransferParameters=null; LoadParameterTargets=null; CheckParameterTarget=null;CreateParameter=null;
+                TransferParameters=null; PreviewParameters=null;LoadParameterTargets=null; CheckParameterTarget=null;CreateParameter=null;
                 CanCreateDucts = false;
                 CanReplaceCategory = false;
                 if (SelectedLink == null)
@@ -357,42 +452,42 @@ namespace IFCInfo
                 try
                 {
                     LoadLink?.Invoke(SelectedLink);
-                    categoryBox.ItemsSource = Categories;
-                    categoryBox.IsEnabled = Categories.Count > 0;
-                    feedback.Text = Categories.Count == 0 ? "The link has no categories containing supported elements." : "Select a category, then click Continue.";
+                    sourceBrowser.SetCategories(Categories);
+                    feedback.Text = Categories.Count == 0 ? "The link has no categories containing supported elements." : "Check categories, then click Continue to review their elements.";
                 }
                 catch (Exception ex) { feedback.Text = "Could not read link: " + ex.Message; }
             };
-            categoryBox.SelectionChanged += (s, e) => {
-                next.IsEnabled = categoryBox.SelectedItem is CategoryOption;
-                elementsTab.Content=null;elementsTab.IsEnabled=true;settingsTab.Content=null;settingsTab.IsEnabled=true;
+            sourceBrowser.SelectionChanged += () => {
+                next.IsEnabled = sourceBrowser.Selected.Count>0;
+                elementsTab.Content=null;elementsTab.IsEnabled=true;settingsTab.Content=null;settingsTab.IsEnabled=DashboardChoice?.IsReview!=true;
             };
             next.Click += (s, e) =>
             {
-                SelectedCategory = categoryBox.SelectedItem as CategoryOption;
-                if (SelectedCategory == null || LoadCategory == null)
-                    return;
+                ReviewCategories=sourceBrowser.Selected.OrderBy(c=>c.Kind=="Line"?0:1).ThenBy(c=>c.Name).ToList();
+                if (ReviewCategories.Count==0 || LoadCategory == null)return;
+                var category=ReviewCategories.FirstOrDefault(c=>c.Id==SelectedCategory?.Id)??ReviewCategories.FirstOrDefault(c=>c.Id==InitialCategoryId)??ReviewCategories[0];
                 try
                 {
-                    using (LoadingWindow.ShowWhile(this, "Reading IFC data", "Reading properties and geometry, and comparing Revit elements…"))
-                        LoadCategory(SelectedCategory);
+                    OpenReviewCategory(category);
                 }
                 catch (Exception ex) { feedback.Text = "Could not read category: " + ex.Message; return; }
                 heading.Text = SelectedCategory.Name;
-                progress.Content = UiDesign.Steps(2,true);
+                progress.Content = WorkflowSteps(2);
                 subtitle.Text = "Step 2 · Select elements";
-                header.Margin = new Thickness(38, 24, 38, 4);
-                elementsTab.Content=new ScrollViewer {Content=CountPage(),VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
-                elementsTab.IsEnabled=true;settingsTab.Content=null;settingsTab.IsEnabled=true;
+                elementsTab.IsEnabled=true;settingsTab.Content=null;settingsTab.IsEnabled=DashboardChoice?.IsReview!=true;
                 workflowTabs.SelectedItem=elementsTab;
-                scroll.ScrollToTop();
                 next.Visibility = Visibility.Collapsed;
                 back.Visibility = Visibility.Visible;
                 zoomSource.Visibility=Visibility.Visible;
                 create.Content = "Next: Parameters →";
                 create.Visibility = CanCreateDucts || CanReplaceCategory ? Visibility.Visible : Visibility.Collapsed;
+                if(DashboardChoice?.IsReview==true)create.Visibility=Visibility.Collapsed;
+                if(DashboardChoice?.IsUpdate==true || DashboardChoice?.IsTransfer==true)
+                    feedback.Text="Highlight source rows in Elements (Ctrl / Shift), then continue to Parameters.";
+                else
                 feedback.Text = "";
             };
+            refreshReviewHeader=()=> {heading.Text=SelectedCategory?.Name??"Elements";subtitle.Text="Step 2 · Review elements by category";create.Content="Next: Parameters →";create.Visibility=DashboardChoice?.IsReview==true?Visibility.Collapsed:CanCreateDucts || CanReplaceCategory?Visibility.Visible:Visibility.Collapsed;};
             back.Click += (s,e)=> {
                 workflowTabs.SelectedItem=workflowTabs.SelectedItem==parametersTab?elementsTab:sourceTab;
             };
@@ -421,10 +516,27 @@ namespace IFCInfo
             };
             create.Click += (s, e) =>
             {
+                if(DashboardChoice?.IsReview==true)return;
+                if(DashboardChoice?.IsUpdate==true || DashboardChoice?.IsTransfer==true)
+                {
+                    var highlighted=parameterSelection.Where(r=>AirTerminals.Contains(r)).ToList();
+                    if(highlighted.Count==0){feedback.Text="Highlight at least one source row in Elements (Ctrl / Shift).";return;}
+                    if(workflowTabs.SelectedItem==elementsTab){workflowTabs.SelectedItem=parametersTab;return;}
+                    if(DashboardChoice.IsTransfer){parameterPanel.TransferSelectedExisting();return;}
+                    if(!parameterPanel.ValidateNext())return;
+                    try
+                    {
+                        if(PrepareUpdates==null){feedback.Text="Duct updates are unavailable. Reload the source link.";return;}
+                        var update=PrepareUpdates(highlighted);
+                        if(update!=null)SubmitDuctRequest(update);
+                    }
+                    catch(Exception ex){feedback.Text="Could not prepare updates: "+ex.Message;}
+                    return;
+                }
                 if(workflowTabs.SelectedItem==elementsTab){if(!AirTerminals.Any(r=>r.IsSelected && r.CanSelect)){feedback.Text="Check at least one source element.";return;} workflowTabs.SelectedItem=parametersTab;return;}
                 if(SelectedCategory==null && !CanCreateDucts){workflowTabs.SelectedItem=settingsTab;return;}
-                if(workflowTabs.SelectedItem==parametersTab && !parameterPanel.ValidateNext()){feedback.Text="Missing or invalid Revit Parameter. Check Parameters.";return;}
                 if (!CanCreateDucts) { openPlacement(); return; }
+                if(workflowTabs.SelectedItem==parametersTab && !parameterPanel.ValidateNext()){feedback.Text="Missing or invalid Revit Parameter. Check Parameters.";return;}
                 var selected = AirTerminals.Where(row => row.IsSelected && row.CanSelect).ToList();
                 if (selected.Count == 0)
                 {
@@ -448,7 +560,24 @@ namespace IFCInfo
 
         private FrameworkElement CountPage()
         {
+            foreach(var row in AirTerminals)
+            {
+                if(string.IsNullOrWhiteSpace(row.CategoryName))row.CategoryName=SelectedCategory?.Name??"Unknown";
+                if(row.CategoryId==0)row.CategoryId=SelectedCategory?.Id??0;
+            }
             var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
+            if(ReviewCategories.Count>1)
+            {
+                var picker=UiDesign.Field(panel,"Review category",ReviewCategories.Count+" checked categories · element checks and parameter mappings are kept separately for each category.","Select category",false,true);
+                picker.Name="ReviewCategoryPicker";picker.ItemsSource=ReviewCategories;picker.SelectedItem=SelectedCategory;
+                picker.SelectionChanged+=(s,e)=> {
+                    if(picker.SelectedItem is CategoryOption category && category.Id!=SelectedCategory?.Id)
+                    {
+                        try{OpenReviewCategory(category);}
+                        catch(Exception ex){feedback.Text="Could not read category: "+ex.Message;picker.SelectedItem=SelectedCategory;}
+                    }
+                };
+            }
             var sourceView = new System.Windows.Data.ListCollectionView(AirTerminals);
             var table = new DataGrid
             {
@@ -535,6 +664,7 @@ namespace IFCInfo
             }
             foreach (var column in new[] {
                 new { Header = "Element ID", Property = "ElementId", Width = 95.0 },
+                new { Header = "Category", Property = "CategoryName", Width = 145.0 },
                 new { Header = "Element", Property = "Name", Width = 220.0 },
                 new { Header = "System Type", Property = "SystemType", Width = 150.0 },
                 new { Header = "System Name", Property = "SystemName", Width = 150.0 },
@@ -546,7 +676,7 @@ namespace IFCInfo
                     IsReadOnly = true,
                     Binding = new System.Windows.Data.Binding(column.Property),
                     Width = new DataGridLength(column.Width,DataGridLengthUnitType.Star),
-                    MinWidth = column.Property == "Name" ? 100 : 65,
+                    MinWidth = column.Property == "CategoryName"?120:column.Property=="ElementId"?95:column.Property == "Name" ? 100 : 65,
                     ElementStyle = cellText
                 });
             }
@@ -663,7 +793,7 @@ namespace IFCInfo
             details.SizeChanged+=(s,e)=>
             {
                 bool stackProperties=details.ActualWidth<900;
-                bool stackViewer=details.ActualWidth<1250;
+                bool stackViewer=details.ActualWidth<1550;
                 details.ColumnDefinitions[1].Width=stackProperties ? new GridLength(0) : new GridLength(420);
                 details.ColumnDefinitions[2].Width=stackViewer ? new GridLength(0) : new GridLength(350);
                 Grid.SetColumn(properties,stackProperties?0:1); Grid.SetRow(properties,stackProperties?3:1);
@@ -703,7 +833,7 @@ namespace IFCInfo
                 Name="IfcElementSearch", Height=40, FontSize=14,
                 VerticalContentAlignment=VerticalAlignment.Center,
                 Padding=new Thickness(10,0,10,0), Margin=new Thickness(0,3,8,3),
-                ToolTip="Search by element ID or name",
+                ToolTip="Search by element ID, name or category",
                 BorderBrush=Brush("#DDD6CE"), Background=Brush("#FFFFFF")
             };
             var searchLayout=new Grid();
@@ -729,7 +859,7 @@ namespace IFCInfo
                     var row=(AirTerminalRow)item;
                     return (filterMode=="all" || (filterMode=="selected" ? row.IsSelected : !row.IsSelected))
                         && (filterExistence==null || row.DuctExistence==filterExistence)
-                        && new[] { row.ElementId,row.Name }
+                        && new[] { row.ElementId,row.Name,row.CategoryName }
                         .Any(value=>(value??"").IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0);
                 };
                 queueProperties();
@@ -763,6 +893,7 @@ namespace IFCInfo
                 var fields=new List<KeyValuePair<string,string>> {
                     new KeyValuePair<string,string>("Select","IsSelected"),
                     new KeyValuePair<string,string>("Element ID","NumericElementId"),
+                    new KeyValuePair<string,string>("Category","CategoryName"),
                     new KeyValuePair<string,string>("Element","Name") };
                 if (CanCreateDucts) fields.Insert(1,new KeyValuePair<string,string>("Duct comparison","DuctExistence"));
                 foreach(var field in fields)
@@ -788,13 +919,13 @@ namespace IFCInfo
 
         public string SystemTableText()
         {
-            var result = new StringBuilder((CanCreateDucts ? "Duct comparison\t" : "") + "Element ID\tElement\tSystem Type\tSystem Name\tElevation (mm)");
+            var result = new StringBuilder((CanCreateDucts ? "Duct comparison\t" : "") + "Element ID\tCategory\tElement\tSystem Type\tSystem Name\tElevation (mm)");
             foreach (var row in AirTerminals)
             {
                 result.AppendLine();
                 if (CanCreateDucts)
                     result.Append(CleanCell(row.DuctExistence) + "\t");
-                result.Append(string.Join("\t", new[] { CleanCell(row.ElementId), CleanCell(row.Name),
+                result.Append(string.Join("\t", new[] { CleanCell(row.ElementId), CleanCell(row.CategoryName),CleanCell(row.Name),
                     CleanCell(row.SystemType), CleanCell(row.SystemName), CleanCell(row.Elevation) }));
             }
             return result.ToString();

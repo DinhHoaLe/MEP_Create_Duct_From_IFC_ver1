@@ -7,7 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 namespace IFCInfo
 {
- internal sealed class ParameterMappingPanel : DockPanel
+ internal sealed partial class ParameterMappingPanel : DockPanel
  {
   readonly ObservableCollection<IfcParameterMapping> mappings=new ObservableCollection<IfcParameterMapping>();
   readonly ObservableCollection<string> sourceChoices=new ObservableCollection<string>();
@@ -22,17 +22,26 @@ namespace IFCInfo
   internal Func<List<string>> Targets;
   internal Func<string,string> CheckTarget; internal Action<string,string,string,string> CreateParameter; internal Func<List<ParameterOption>> Types,Groups,Catalog;
   internal Func<List<AirTerminalRow>,List<IfcParameterMapping>,string> Transfer;
+  internal Func<List<AirTerminalRow>,List<IfcParameterMapping>,List<ParameterValuePreview>> Preview;
   internal ParameterMappingPanel()
   {
    Margin=new Thickness(16);
    var top=new StackPanel();SetDock(top,Dock.Top);Children.Add(top);
 
    top.Children.Add(selectionSummary);
-   var toolbar=new WrapPanel();top.Children.Add(toolbar);
-   AddButton(toolbar,"Refresh parameters",Refresh);
-   AddButton(toolbar,"Add parameters…",AddParameters);
-   AddButton(toolbar,"Create parameter…",CreateParameterDialog);
-   AddButton(toolbar,"Project Parameters",ShowProjectParameters);
+   top.Children.Add(new TextBlock {Text="Optional: create ducts without adding parameters, or configure the values to transfer below.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(6)});
+   var toolbar=new WrapPanel{Name="ParameterTools"};top.Children.Add(toolbar);
+   var refresh=IFCInfoWindow.IconButton("Refresh parameters","M20,8 A8,8 0 1 0 20,16 M20,3 L20,9 L14,9");
+   refresh.Name="RefreshParameterTools";refresh.Margin=new Thickness(6);refresh.Click+=(s,e)=>Refresh();toolbar.Children.Add(refresh);
+   AddActionMenu(toolbar,"Parameters","Add, create or inspect project parameters",new Dictionary<string,Action>{
+       {"Add parameters…",AddParameters},{"Create parameter…",CreateParameterDialog},
+       {"Create multiple from IFC…",()=>BuildBulkParameterDialog().ShowDialog()},{"Project Parameters",ShowProjectParameters}});
+   AddActionMenu(toolbar,"CSV","Import parameter definitions or export CSV files",new Dictionary<string,Action>{
+       {"Import parameter CSV…",ImportParameterCsv},{"Export selected IFC CSV…",ExportSelectedParameterCsv},{"Export CSV template…",ExportParameterCsvTemplate}});
+   AddActionMenu(toolbar,"Presets","Save or load a reusable mapping configuration",new Dictionary<string,Action>{
+       {"Save mapping preset…",SaveMappingPreset},{"Load mapping preset…",LoadMappingPreset}});
+   AddActionMenu(toolbar,"Values","Preview values or update existing tracked ducts",new Dictionary<string,Action>{
+       {"Preview values…",PreviewValues},{"Update existing ducts",TransferExisting}});
 
    var messageScroll=new ScrollViewer {Content=status,MaxHeight=115,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};top.Children.Add(messageScroll);
    grid=new DataGrid {ItemsSource=mappings,AutoGenerateColumns=false,CanUserAddRows=false,CanUserDeleteRows=false,RowHeight=48};
@@ -58,6 +67,7 @@ namespace IFCInfo
   DataGridTemplateColumn ChoiceColumn(string header,string property,ObservableCollection<string> choices)
   {
    var combo=new FrameworkElementFactory(typeof(ComboBox));
+   combo.SetValue(ItemsControl.ItemsSourceProperty,choices);
    combo.AddHandler(FrameworkElement.LoadedEvent,new RoutedEventHandler((sender,e)=> {
       var box=(ComboBox)sender;
       if(box.ItemsSource is ListCollectionView existing){existing.Refresh();return;}
@@ -79,20 +89,33 @@ namespace IFCInfo
   internal List<string> AvailableChoices(IfcParameterMapping row,string property,IEnumerable<string> choices)
   {
    var used=new HashSet<string>(mappings.Where(m=>m!=row).Select(m=>property=="Source"?m.Source:m.Target).Where(v=>!string.IsNullOrEmpty(v)),StringComparer.OrdinalIgnoreCase);
-   return choices.Where(v=>(!used.Contains(v) || v==(property=="Source"?row?.Source:row?.Target)) && (property=="Source" || CompatibleTarget(row,v))).ToList();
+   return choices.Where(v=>(!used.Contains(v) || v==(property=="Source"?row?.Source:row?.Target)) && (property=="Source" || v==row?.Target || CompatibleTarget(row,v))).ToList();
   }
-  internal bool CompatibleTarget(IfcParameterMapping row,string target)
+  internal bool CompatibleTarget(IfcParameterMapping row,string target,List<AirTerminalRow> rows=null)
   {
    var catalog=Catalog?.Invoke()??new List<ParameterOption>();
    if(catalog.Count==0)return true;
    if(row==null || string.IsNullOrWhiteSpace(row.Source))return false;
-   UpdateSourceType(row);
+   UpdateSourceType(row,rows);
    if(string.IsNullOrWhiteSpace(row.SourceType) || row.SourceType=="Unknown" || row.SourceType.Contains(","))return false;
    var candidate=catalog.FirstOrDefault(p=>p.Name==target);
    return candidate!=null && !string.IsNullOrEmpty(candidate.DataKind) &&
        candidate.DataKind==SuggestedType(row.SourceType) && CheckTarget?.Invoke(target)=="Ready";
   }
   static void AddButton(Panel panel,string text,Action action){var b=IFCInfoWindow.Button(text,false);b.Margin=new Thickness(6);b.Click+=(s,e)=>action();panel.Children.Add(b);}
+  static void AddActionMenu(Panel panel,string title,string description,Dictionary<string,Action> actions)
+  {
+   var button=IFCInfoWindow.Button(title+" ▾",false);button.Name="ParameterMenu"+title;button.Margin=new Thickness(6);button.ToolTip=description;
+   var menu=new ContextMenu{Background=IFCInfoWindow.Brush("#FFFFFF"),Foreground=IFCInfoWindow.Brush("#37322B"),FontSize=13};
+   foreach(var action in actions)
+   {
+    var item=new MenuItem{Header=action.Key,ToolTip=action.Key,Padding=new Thickness(10,7,10,7)};
+    item.Click+=(s,e)=>action.Value();menu.Items.Add(item);
+   }
+   button.ContextMenu=menu;
+   button.Click+=(s,e)=>{menu.PlacementTarget=button;menu.Placement=System.Windows.Controls.Primitives.PlacementMode.Bottom;menu.IsOpen=true;};
+   panel.Children.Add(button);
+  }
   internal static string SuggestedType(string sourceType)
   {
    string t=(sourceType??"").ToUpperInvariant();
@@ -129,8 +152,8 @@ namespace IFCInfo
    discipline.ItemsSource=options.Select(x=>x.Discipline).Distinct().OrderBy(x=>x).ToList();
    var type=UiDesign.Field(root,"Data type","","Select type",false,true);type.Name="CreatedParameterType";
    discipline.SelectionChanged+=(s,e)=> {type.ItemsSource=options.Where(x=>x.Discipline==(string)discipline.SelectedItem).ToList();type.SelectedIndex=0;};
-   discipline.SelectedItem=options.FirstOrDefault(x=>x.Id=="Text" || x.Id.Contains(":text-"))?.Discipline??options[0].Discipline;
-   type.SelectedItem=options.FirstOrDefault(x=>x.Id=="Text" || x.Id.Contains(":text-"))??options[0];
+   discipline.SelectedItem=InferParameterType(options,"text")?.Discipline??options[0].Discipline;
+   type.SelectedItem=InferParameterType(options,"text")??options[0];
    var group=UiDesign.Field(root,"Group parameter under","","Select group",false,true);
    var groups=Groups?.Invoke()??new List<ParameterOption>();if(groups.Count==0)groups=new[]{"Data","Identity Data"}.Select(x=>new ParameterOption{Id=x,Name=x}).ToList();
    group.ItemsSource=groups;group.SelectedItem=groups.FirstOrDefault(x=>x.Id.Contains(":data-"))??groups[0];
@@ -152,7 +175,7 @@ namespace IFCInfo
           type.SelectedItem=null;feedback.Text="IFC type is missing or inconsistent. Use Manual.";return;
       }
       string key=SuggestedType(probe.SourceType);
-      var inferred=options.FirstOrDefault(x=>x.Id.Equals(key,StringComparison.OrdinalIgnoreCase) || x.Id.IndexOf(":"+key+"-",StringComparison.OrdinalIgnoreCase)>=0);
+      var inferred=InferParameterType(options,key);
       if(inferred==null){type.SelectedItem=null;feedback.Text="No matching Revit type. Use Manual.";return;}
       discipline.SelectedItem=inferred.Discipline;type.SelectedItem=inferred;
    };
@@ -175,14 +198,23 @@ namespace IFCInfo
    AddButton(buttons,"Cancel",()=>dialog.Close());
    UiDesign.SetContent(dialog,new ScrollViewer {Content=root,VerticalScrollBarVisibility=ScrollBarVisibility.Auto});
    return dialog;
-  }  void AddParameters()
+  }
+  void AddParameters()=>BuildAddParametersDialog().ShowDialog();
+  internal Window BuildAddParametersDialog()
   {
-   var dialog=new Window {Title="Add IFC parameters",Width=620,Height=500,Owner=Window.GetWindow(this),WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=UiDesign.Background};
+   var dialog=new Window {Title="Add IFC parameters",Width=620,Height=500,WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=UiDesign.Background};
+   if(Window.GetWindow(this)?.IsVisible==true)dialog.Owner=Window.GetWindow(this);
    var root=new DockPanel {Margin=new Thickness(16)};
-   var note=new TextBlock {Text="Select several IFC properties (Ctrl / Shift). All pairs apply to the elements checked in Elements.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(6)};
+   var note=new TextBlock {Text="Select IFC properties using Select all or Ctrl / Shift. All pairs apply to the elements checked in Elements.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(6)};
    DockPanel.SetDock(note,Dock.Top);root.Children.Add(note);
-   var list=new ListBox {ItemsSource=AvailableChoices(null,"Source",sourceChoices),SelectionMode=SelectionMode.Extended};
+   var list=new ListBox {Name="AvailableIfcParameters",ItemsSource=AvailableChoices(null,"Source",sourceChoices),SelectionMode=SelectionMode.Extended};
+   var selectionTools=new WrapPanel();DockPanel.SetDock(selectionTools,Dock.Top);root.Children.Add(selectionTools);
+   AddButton(selectionTools,"Select all",()=>list.SelectAll());
+   AddButton(selectionTools,"Clear selection",()=>list.UnselectAll());
+   var selectedCount=new TextBlock {Margin=new Thickness(6),VerticalAlignment=VerticalAlignment.Center};selectionTools.Children.Add(selectedCount);
    var add=IFCInfoWindow.Button("Add selected parameters",true);DockPanel.SetDock(add,Dock.Bottom);root.Children.Add(add);
+   Action updateSelection=()=> {selectedCount.Text=list.SelectedItems.Count+" / "+list.Items.Count+" selected";add.IsEnabled=list.SelectedItems.Count>0;};
+   list.SelectionChanged+=(s,e)=>updateSelection();updateSelection();
    add.Click+=(s,e)=> {
     foreach(string source in list.SelectedItems) {
      var row=NewMapping();row.Source=source;
@@ -192,7 +224,7 @@ namespace IFCInfo
     foreach(var empty in mappings.Where(m=>string.IsNullOrEmpty(m.Source)&&string.IsNullOrEmpty(m.Target)).ToList())mappings.Remove(empty);
     dialog.Close();
    };
-   root.Children.Add(list);UiDesign.SetContent(dialog,root);dialog.ShowDialog();
+   root.Children.Add(list);UiDesign.SetContent(dialog,root);return dialog;
   }
   bool updatingPair;
   void OnPairChanged(IfcParameterMapping row,string property)
@@ -239,10 +271,10 @@ namespace IFCInfo
     default:return type;
    }
   }
-  void UpdateSourceType(IfcParameterMapping map)
+  void UpdateSourceType(IfcParameterMapping map,List<AirTerminalRow> rows=null)
   {
    if(map.Source=="IFC GUID" || map.Source=="IFC Element ID"){map.SourceType=map.Source=="IFC GUID"?"Text":"Integer";return;}
-   var types=(Sources?.Invoke()??new List<AirTerminalRow>()).SelectMany(r=>r.IfcProperties).Where(p=>IfcParameterMapping.Key(p)==map.Source || p.Name==map.Source).Select(p=>string.IsNullOrEmpty(p.DataType)?"Unknown":p.DataType).Distinct().ToList();
+   var types=(rows??Sources?.Invoke()??new List<AirTerminalRow>()).SelectMany(r=>r.IfcProperties).Where(p=>IfcParameterMapping.Key(p)==map.Source || p.Name==map.Source).Select(p=>string.IsNullOrEmpty(p.DataType)?"Unknown":p.DataType).Distinct().ToList();
    map.SourceType=types.Count==0?"Unknown":string.Join(", ",types.Select(FriendlyType).Distinct());
   }
   IfcParameterMapping NewMapping()=>new IfcParameterMapping();
@@ -274,7 +306,7 @@ namespace IFCInfo
   string Error(IfcParameterMapping m,List<AirTerminalRow> rows)
   {
    if(string.IsNullOrWhiteSpace(m.Source)||string.IsNullOrWhiteSpace(m.Target))return "Select both IFC Property and Revit Parameter.";
-   if(!CompatibleTarget(m,m.Target))return "Choose a writable Revit parameter matching the IFC data type.";
+   if(!CompatibleTarget(m,m.Target,rows))return "Choose a writable Revit parameter matching the IFC data type.";
    string state=CheckTarget?.Invoke(m.Target)??"Catalog unavailable";
    if(state!="Ready"&&!(state=="Missing"&&m.CreateMissing))return m.Target+": "+(state=="Missing"?"Missing. Use Create parameter to add a Text instance parameter bound to Ducts.":state);
    try {var values=rows.Where(m.Applies).Select(r=>IfcParameterMapping.Read(r,m.Source)).ToList();if(!values.Any(v=>v!=null))return m.Source+": not found in the applicable IFC sources.";}catch(Exception ex){return ex.Message;}
@@ -283,7 +315,6 @@ namespace IFCInfo
   internal bool Ready => ValidateCore(null,false);
   internal bool ValidateNext()
   {
-   if(mappings.Count==0 || mappings.All(m=>string.IsNullOrWhiteSpace(m.Source)&&string.IsNullOrWhiteSpace(m.Target))){status.Text="Missing parameter: add an IFC property and select a Revit Parameter before continuing.";return false;}
    return ValidateCore(null,true);
   }
   internal bool Validate(DuctRequest request)=>ValidateCore(request,true);
@@ -291,12 +322,17 @@ namespace IFCInfo
   {
    var rows=request==null?(Sources?.Invoke()??new List<AirTerminalRow>()):(request.Items??new List<DuctPlanItem>()).Select(i=>i.Source).ToList();
    if(commit){grid.CommitEdit(DataGridEditingUnit.Cell,true);grid.CommitEdit(DataGridEditingUnit.Row,true);}
-   var errors=new List<string>();var active=mappings.Where(m=>m.Selected && (!string.IsNullOrEmpty(m.Source)||!string.IsNullOrEmpty(m.Target))).ToList();
+   var errors=new List<string>();
+   var selected=mappings.Where(m=>m.Selected).ToList();
+   // Adding a source is a draft choice, not a request to transfer a value.
+   var active=selected.Where(m=>!string.IsNullOrWhiteSpace(m.Source)&&!string.IsNullOrWhiteSpace(m.Target)).ToList();
+   int pending=selected.Count(m=>!string.IsNullOrWhiteSpace(m.Source)||!string.IsNullOrWhiteSpace(m.Target))-active.Count;
    foreach(var m in active)if(createMissing.IsChecked==true)m.CreateMissing=true;
    foreach(var m in active){string error=Error(m,rows);if(error!=null)errors.Add("Row "+(mappings.IndexOf(m)+1)+": "+error);}
    if(active.GroupBy(m=>m.Source).Any(g=>g.Count()>1))errors.Add("Each IFC property may be used only once.");
    if(active.Any(m=>active.Any(x=>x!=m&&!string.IsNullOrWhiteSpace(m.Target)&&string.Equals(x.Target,m.Target,StringComparison.OrdinalIgnoreCase)&&(x.ElementIds==null || m.ElementIds==null || x.ElementIds.Intersect(m.ElementIds).Any()))))errors.Add("Duplicate Revit target mappings.");
-   status.Text=errors.Count>0?string.Join("\n",errors):active.Count==0?"No properties configured. Use Add parameters to choose values to write.":active.Count+" parameter(s) will be assigned to "+rows.Count+" selected duct(s) when Create is clicked.";
+   status.Text=errors.Count>0?string.Join("\n",errors):active.Count==0?"No parameters configured. You can continue and create ducts without parameter mapping.":active.Count+" parameter(s) will be assigned to "+rows.Count+" selected duct(s) when Create is clicked.";
+   if(errors.Count==0 && pending>0)status.Text+=" "+pending+" incomplete pair(s) will be skipped. Select both columns to transfer their values.";
    if(errors.Count>0)return false;
    if(request!=null)request.ParameterMappings=Snapshot(active);
    return true;
@@ -311,5 +347,6 @@ namespace IFCInfo
    if(request.ParameterMappings.Count==0){status.Text="Map at least one parameter first.";return;}
    try {status.Text=Transfer?.Invoke(rows,request.ParameterMappings)??"Transfer unavailable.";}catch(Exception ex){status.Text="Transfer failed; changes rolled back. "+ex.Message;}
   }
+  internal void TransferSelectedExisting()=>TransferExisting();
  }
 }

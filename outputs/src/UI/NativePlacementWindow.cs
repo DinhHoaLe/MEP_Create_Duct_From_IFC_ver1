@@ -106,6 +106,7 @@ namespace IFCInfo
             var notes = IFCInfoWindow.Text("Point families use the source insertion point or bounding-box center. Additional rotation is around Z or the host normal. " +
                 "Hosted families require a planar host face. Adaptive families require control points for each source. Line-based families can use two picked points if the source path cannot be read.\n\n" +
                 "Straight ducts, pipes, conduits and cable trays use the IFC centerline and dimensions. A new length keeps the first endpoint fixed. Unsupported curved, hollow or complex geometry is reported without guessing dimensions. Duct fittings use a family in the selected category.\n\n" +
+                "Other supported MEP and Generic Model categories use a loaded family in the same category. Hosted families require a suitable planar host face; the family placement mode and selected rotation are used, not an exact reconstruction of the IFC shape.\n\n" +
                 "IFC Pset/Qto data, when available, is stored with placed elements and can be exported to CSV. Source properties are not automatically converted to Revit shared parameters.", 13, "#716B63");
             notes.Margin = new Thickness(0, 20, 0, 0);
             body.Children.Add(notes);

@@ -23,7 +23,15 @@ foreach ($value in @([long]123,[long]-2008000)) {
 }
 $m=$a.GetType('IFCInfo.SupportedCategories').GetMethod('Contains',[Reflection.BindingFlags]'Static,NonPublic')
 $allowed=@([Enum]::GetValues([Autodesk.Revit.DB.BuiltInCategory]) | Where-Object { $m.Invoke($null,[object[]]@([long]$_)) })
-$expected=@('OST_DuctCurves','OST_DuctFitting','OST_PipeCurves','OST_Conduit','OST_CableTray')
-if ($allowed.Count -ne 5 -or @($expected | Where-Object { $_ -notin @($allowed | ForEach-Object ToString) }).Count) { throw 'Unexpected allowed categories' }
+$expected=@('OST_DuctCurves','OST_PipeCurves','OST_Conduit','OST_CableTray',
+ 'OST_DuctFitting','OST_DuctAccessory','OST_DuctTerminal','OST_MechanicalEquipment',
+ 'OST_PipeFitting','OST_PipeAccessory','OST_PlumbingFixtures','OST_Sprinklers',
+ 'OST_CableTrayFitting','OST_ConduitFitting','OST_ElectricalEquipment','OST_ElectricalFixtures',
+ 'OST_LightingFixtures','OST_LightingDevices','OST_DataDevices','OST_CommunicationDevices',
+ 'OST_FireAlarmDevices','OST_SecurityDevices','OST_TelephoneDevices','OST_NurseCallDevices','OST_GenericModel')
+if ($allowed.Count -ne $expected.Count -or @($expected | Where-Object { $_ -notin @($allowed | ForEach-Object ToString) }).Count) { throw 'Unexpected allowed categories' }
+$lineMethod=$a.GetType('IFCInfo.SupportedCategories').GetMethod('IsLine',[Reflection.BindingFlags]'Static,NonPublic')
+$lineAllowed=@($allowed | Where-Object { $lineMethod.Invoke($null,[object[]]@([long]$_)) })
+if ($lineAllowed.Count -ne 4) { throw 'Only the four native curve categories may use line builders' }
 $allowed
 $a.FullName

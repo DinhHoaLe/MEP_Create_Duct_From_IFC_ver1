@@ -4,6 +4,10 @@ C# add-in for Revit 2023/2024, .NET Framework 4.8, x64. Reads linked IFC models 
 
 ## Test with Add-in Manager in Revit 2023
 
+The source now opens a dashboard before the existing workspace. Choose a task, MEP and either Line or Family Instance. Create uses the existing source/element/parameter and creation or placement screens. Update and parameter transfer are restricted to ducts; highlight source rows in Elements for these tasks. Review / Compare exposes source inspection and the existing duct comparison with model-changing screens disabled. Use **Dashboard** to switch tasks. Architecture and Structure are shown as planned and cannot open a workspace yet.
+
+The Revit 2023 release DLL includes the dashboard. Its Release/net48/x64 build completed with zero warnings/errors; 14 dashboard WPF/dispatch checks passed outside Revit, and the release check confirmed API 2023 references and matching built/staged DLL hashes. Live Revit acceptance remains pending.
+
 Load `release/IFCInfo-Revit2023/IFCInfo_Revit2023.dll` and run `IFCInfo.IFCInfoCommand`. No installer or .addin manifest is required. If Revit has retained a previous DLL, restart Revit before loading the new build.
 
 Select a loaded IFC link and a source category, then check the elements to create. The tool finds the original IFC beside the link when possible. After a create/update run, click **Back to tool** in the report to return to the refreshed source list. Use **Back** to select another link or category. Close the main window to end the session.
