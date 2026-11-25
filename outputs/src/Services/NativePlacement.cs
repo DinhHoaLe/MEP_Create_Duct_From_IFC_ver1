@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
@@ -14,7 +14,7 @@ namespace IFCInfo
     internal static class NativePlacement
     {
         // Reuse the previous family source schema to preserve duplicate protection.
-        private static readonly Guid Tracking=new Guid("40333d70-0718-419c-8588-c342475082c6");
+        internal static readonly Guid Tracking=new Guid("40333d70-0718-419c-8588-c342475082c6");
         internal static void Execute(UIDocument ui,RevitLinkInstance link,IFCInfoWindow window)
         {
             var request=window.Replacement; if (request==null) return;
@@ -50,20 +50,34 @@ namespace IFCInfo
                     var data=e.GetEntity(schema); if (data.IsValid()) existing.Add(data.Get<string>(schema.GetField("SourceKey")));
                 }
             var reports=new List<DuctRunRow>(); var created=new List<ElementId>();
+            if(request.ParameterMappings.Count>0 && !SupportedCategories.IsLine(request.SourceCategoryId))
+                throw new InvalidOperationException("Parameter transfer during placement supports line categories only.");
+            var selectedRows=window.AirTerminals.Where(r=>request.SourceIds.Contains(r.ElementId)).ToList();
+            foreach(var map in request.ParameterMappings)
+                if(DuctParameterMapping.IsTypeTarget(doc,map.Target) || map.CreateMissing && map.ParameterBinding=="Type")
+                    if(selectedRows.Where(map.Applies).GroupBy(r=>request.SourceTypeIds.TryGetValue(r.ElementId,out var targetType)?targetType:request.TypeId).Any(g=>g.Select(r=>IfcParameterMapping.Read(r,map.Source)).Where(v=>v!=null).Distinct().Count()>1))
+                        throw new InvalidOperationException("Different IFC values for shared Type parameter '"+map.Target+"'. Use Instance binding or separate target types.");
             string run=DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")+" | "+Guid.NewGuid(); bool rolledBack=false;
             using (var group=new TransactionGroup(doc,"IFC - Place native elements"))
             {
                 group.Start();
                 try
                 {
+                    if(request.ParameterMappings.Count>0)DuctCreation.RunTransaction(doc,"IFC - Prepare mapped parameters",()=>DuctParameterMapping.Ensure(doc,request.ParameterMappings,(BuiltInCategory)request.SourceCategoryId));
                     foreach (string id in request.SourceIds.Distinct())
                     {
                         var row=window.AirTerminals.First(r=>r.ElementId==id);
                         var report=new DuctRunRow { RunId=run,SourceId=id,IfcGuid=row.IfcGuid,IfcPsets=IfcPropertyStorage.Text(row) }; reports.Add(report);
                         try
                         {
-                            if(request.SystemTypes.TryGetValue(row.SystemType??"",out long mappedSystem)) request.SystemTypeId=mappedSystem;
+                            if(request.SourceSystemTypeIds.TryGetValue(id,out long sourceSystem))request.SystemTypeId=sourceSystem;
+                            else if(request.SystemTypes.TryGetValue(row.SystemType??"",out long mappedSystem)) request.SystemTypeId=mappedSystem;
+                            var placementType=request.SourceTypeIds.TryGetValue(id,out long sourceType)?doc.GetElement(ElementIds.Create(sourceType)) as ElementType:type;
+                            if(placementType==null || placementType.Category?.Id.Number()!=request.SourceCategoryId)throw new InvalidOperationException("The mapped target type no longer exists or has a different category.");
+                            if(placementType is PipeType && !(doc.GetElement(ElementIds.Create(request.SystemTypeId)) is PipingSystemType))throw new InvalidOperationException("The mapped piping system type is invalid.");
                             var source=linked.GetElement(ElementIds.Create(long.Parse(id)));
+                            var placementLevel=request.SourceLevelIds.TryGetValue(id,out long levelId)?doc.GetElement(ElementIds.Create(levelId)) as Level:level;
+                            if(placementLevel==null)throw new InvalidOperationException("The mapped target level no longer exists.");
                             if (source==null) throw new InvalidOperationException("Source not found.");
                             string key=link.UniqueId+"|"+(string.IsNullOrWhiteSpace(row.IfcGuid)?source.UniqueId:row.IfcGuid);
                             if (existing.Contains(key)) { report.Status="Skipped"; report.Reason="This source has already been created by the tool."; continue; }
@@ -91,9 +105,10 @@ namespace IFCInfo
                                     placed=CreateFamily(doc,source,link.GetTotalTransform(),row,symbol,level,request,hostReference,hostFace,host,adaptivePoints);
                                 else if (request.Kind=="Wall" || request.Kind=="Floor" || request.Kind=="Roof")
                                     placed=NativeBuildingPlacement.Create(doc,source,link.GetTotalTransform(),type,level,request.Kind);
-                                else placed=CreateCurve(doc,source,link.GetTotalTransform(),row,type,level,request);
+                                else placed=CreateCurve(doc,source,link.GetTotalTransform(),row,placementType,placementLevel,request);
                                 if (placed==null) throw new InvalidOperationException("Revit did not return a new element.");
                                 if (placed.Category?.Id!=type.Category?.Id) throw new InvalidOperationException("The resulting category does not match the selected type.");
+                                DuctParameterMapping.Apply(placed,row,request.ParameterMappings);
                                 SaveTracking(placed,key,row); IfcPropertyStorage.Save(placed,row);
                                 if (placed is Duct duct)
                                 {
@@ -103,7 +118,7 @@ namespace IFCInfo
                                 }
                             });
                             existing.Add(key); created.Add(placed.Id); report.TargetId=placed.Id.Number().ToString(); report.Success=true; report.Status="Placed";
-                            report.Reason=request.Kind+" · "+type.Name+(symbol!=null ? " · Family uses the selected type dimensions; Psets retain source data." : " · Native geometry follows the source.");
+                            report.Reason=request.Kind+" · "+placementType.Name+(symbol!=null ? " · Family uses the selected type dimensions; Psets retain source data." : " · Native geometry follows the source.");
                             if (adaptivePoints.Count>0) report.Reason+=" Control points were picked by the user in Revit.";
                         }
                         catch (Autodesk.Revit.Exceptions.OperationCanceledException) { report.Status="Cancelled"; throw; }
@@ -181,9 +196,16 @@ namespace IFCInfo
                 connector.Shape!=ConnectorProfileType.Rectangular || Math.Abs(connector.Width-path.Width)>0.002 || Math.Abs(connector.Height-path.Height)>0.002 ||
                 Math.Abs(connector.CoordinateSystem.BasisX.DotProduct(path.WidthAxis))<1-1e-6)
                 throw new InvalidOperationException("Native dimensions/profile orientation do not match after creation.");
+            if(curve.ReferenceLevel?.Id!=level.Id)throw new InvalidOperationException("The native reference level does not match the source mapping.");
             if (curve.GetTypeId()!=type.Id) throw new InvalidOperationException("The native type does not match the selection.");
             if (curve is Pipe && curve.get_Parameter(BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM)?.AsElementId()!=ElementIds.Create(request.SystemTypeId))
                 throw new InvalidOperationException("The pipe system type does not match the selection.");
+            if(curve is CableTray && request.ServiceTypes.TryGetValue(row.ElementId,out string service) && !string.IsNullOrWhiteSpace(service))
+            {
+                var parameter=curve.get_Parameter(BuiltInParameter.RBS_CTC_SERVICE_TYPE);
+                if(parameter==null || parameter.IsReadOnly || parameter.StorageType!=StorageType.String || !parameter.Set(service) || parameter.AsString()!=service)
+                    throw new InvalidOperationException("Could not assign the cable tray Service Type.");
+            }
             return curve;
         }
         private static FamilyInstance CreateFamily(Document doc,Element source,Transform transform,AirTerminalRow row,FamilySymbol symbol,Level level,ReplacementRequest request,

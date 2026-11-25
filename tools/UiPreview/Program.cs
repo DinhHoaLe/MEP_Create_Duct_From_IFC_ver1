@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -16,6 +16,359 @@ using IFCInfo;
 internal static class Program
 {
     private static int checks;
+    private static void RenderServiceAndSlope(string output)
+    {
+        Directory.CreateDirectory(output);
+        long cat=(long)Autodesk.Revit.DB.BuiltInCategory.OST_CableTray;
+        var row=new AirTerminalRow{ElementId="101",Name="Cable Tray with Fittings : Default",SourceLevelName="Level 1",ServiceType="Power"};
+        var w=new CurveCreationWindow(new List<AirTerminalRow>{row},new List<ReplacementTypeOption>{new ReplacementTypeOption{Id=10,Label=row.Name,Kind="CableTray",CategoryId=cat,Supported=true}},new List<ReplacementLevelOption>{new ReplacementLevelOption{Id=1,Label="Level 1"}},new List<ReplacementTypeOption>(),cat,"CableTray",new List<string>{"Power","Data","Lighting"});
+        var nodes=Descendants(w).OfType<FrameworkElement>().ToList();
+        Render(w,output,"cable-service-manual-existing.png",1440,900);
+        var choice=nodes.OfType<ComboBox>().Single(c=>c.Name=="GroupServiceFollowMode");
+        choice.SelectedItem=choice.Items.OfType<ServiceTypeChoice>().Single(c=>c.Kind=="New");nodes.OfType<TextBox>().Single(c=>c.Name=="GroupServiceType").Text="Emergency Power";
+        Render(w,output,"cable-service-manual-new.png",1440,900);
+        nodes.OfType<ComboBox>().Single(c=>c.Name=="CurveSetupMode").SelectedIndex=1;
+        Render(w,output,"cable-service-auto-ifc.png",1440,900);w.Close();
+        var main=new IFCInfoWindow();typeof(IFCInfoWindow).GetProperty("SelectedCategory").SetValue(main,new CategoryOption{Id=(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves,Name="Pipes"},null);
+        main.AirTerminals=new List<AirTerminalRow>{new AirTerminalRow{ElementId="201",Name="Pipe — horizontal",SlopePercent=0},new AirTerminalRow{ElementId="202",Name="Pipe — slope 2%",SlopePercent=2},new AirTerminalRow{ElementId="203",Name="Pipe — vertical",IsVerticalPipe=true}};
+        var page=(FrameworkElement)typeof(IFCInfoWindow).GetMethod("CountPage",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(main,null);
+        var preview=new Window{Content=page};Render(preview,output,"pipe-elements-slope.png",1440,650);preview.Close();main.Close();
+    }
+
+    private static void TestServicesAndSlope()
+    {
+        var picker=new CableServicePicker(new[]{"Power","Data"," power ",""},"Power");
+        var choices=picker.Selector.Items.OfType<ServiceTypeChoice>().ToList();
+        Assert(choices.Count(c=>c.Kind=="Existing")==2 && choices.All(c=>c.Kind!="Follow"),"Manual service list contains filled values, no Follow IFC and no duplicates");
+        Assert(picker.Value=="Power" && picker.IsValid && picker.NewValue.Visibility==Visibility.Collapsed,"Manual preselects a matching filled service and hides the new-value input");
+        picker.Selector.SelectedItem=choices.Single(c=>c.Value=="Data");Assert(picker.Value=="Data","Manual can select an existing project service");
+        picker.Selector.SelectedItem=choices.Single(c=>c.Kind=="New");
+        Assert(picker.NewValue.Visibility==Visibility.Visible && !picker.IsValid,"Enter new shows its input and rejects empty text");
+        picker.NewValue.Text="Emergency";Assert(picker.IsValid && picker.Value=="Emergency","New service value is retained for creation");
+        picker.SetAutomatic(true,"IFC Power");Assert(picker.Value=="IFC Power" && picker.Selector.Visibility==Visibility.Collapsed && picker.AutoDisplay.SelectedItem.ToString().Contains("IFC Power"),"Auto shows the resolved IFC service instead of a Manual policy selector");
+        picker.SetAutomatic(false,"");Assert(picker.Value=="Emergency" && picker.NewValue.Visibility==Visibility.Visible,"Returning to Manual restores the existing custom value");
+        picker.SetAutomatic(true,"");Assert(picker.IsValid && picker.AutoDisplay.SelectedItem.ToString().Contains("No source service"),"Missing IFC service is visibly reported in Auto");
+        var missing=new CableServicePicker(new[]{"Power"},"");Assert(missing.Selector.SelectedItem==null && !missing.IsValid,"Manual without source service requires a real choice instead of silently following IFC");
+        missing.Selector.SelectedItem=missing.Selector.Items.OfType<ServiceTypeChoice>().Single(c=>c.Kind=="Default");Assert(missing.IsValid && missing.Value=="","Explicit Keep native default allows an empty service");
+        var row=new AirTerminalRow();PipeSlope.Set(row,10,0,.2);Assert(Math.Abs(row.SlopePercent.Value-2)<1e-9 && row.Slope=="2","Pipe slope is rise over horizontal run in percent");
+        PipeSlope.Set(row,-10,0,-.2);Assert(row.Slope=="2","Endpoint order does not change slope magnitude");
+        PipeSlope.Set(row,3,4,.05);Assert(row.Slope=="1","Slope uses horizontal XY length, not spatial pipe length");
+        PipeSlope.Set(row,1,0,0);Assert(row.Slope=="0","Horizontal pipes explicitly report zero percent");
+        PipeSlope.Set(row,0,0,10);Assert(row.Slope=="Vertical" && !row.SlopePercent.HasValue,"Vertical pipes are not reported as zero slope");
+        PipeSlope.Set(row,0,0,0);Assert(row.Slope=="Unavailable","Degenerate centerlines have no fabricated slope");
+        PipeSlope.Set(row,double.NaN,0,1);Assert(row.Slope=="Unavailable","Non-finite geometry is rejected");
+        foreach(bool pipe in new[]{true,false}) {
+            var w=new IFCInfoWindow();
+            typeof(IFCInfoWindow).GetProperty("SelectedCategory").SetValue(w,new CategoryOption{Id=(long)(pipe?Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves:Autodesk.Revit.DB.BuiltInCategory.OST_CableTray),Name=pipe?"Pipes":"Cable Trays"},null);
+            w.AirTerminals=new List<AirTerminalRow>{new AirTerminalRow{ElementId="1",SlopePercent=2}};
+            var page=(FrameworkElement)typeof(IFCInfoWindow).GetMethod("CountPage",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(w,null);
+            var table=Descendants(page).OfType<DataGrid>().First();
+            Assert(table.Columns.Any(c=>Equals(c.Header,"Slope (%)"))==pipe,"Elements shows Slope (%) only for Pipes: "+pipe);w.Close();
+        }
+    }
+
+    private static void TestUnifiedSettings(string output=null)
+    {
+        if(output!=null)Directory.CreateDirectory(output);
+        foreach(string kind in new[]{"Pipe","CableTray","Conduit"}) {
+            long cat=(long)(kind=="Pipe"?Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves:kind=="CableTray"?Autodesk.Revit.DB.BuiltInCategory.OST_CableTray:Autodesk.Revit.DB.BuiltInCategory.OST_Conduit);
+            var rows=new List<AirTerminalRow>{new AirTerminalRow{ElementId="101",Name=kind+" source",SystemType="Supply",SourceLevelName="Level 1",ServiceType="Power"}};
+            var types=new List<ReplacementTypeOption>{new ReplacementTypeOption{Id=10,Label=kind+" source",Kind=kind,CategoryId=cat,Supported=true}};
+            var levels=new List<ReplacementLevelOption>{new ReplacementLevelOption{Id=1,Label="Level 1",ElevationMm=0},new ReplacementLevelOption{Id=2,Label="Level 2",ElevationMm=4000}};
+            var w=new CurveCreationWindow(rows,types,levels,new List<ReplacementTypeOption>{new ReplacementTypeOption{Id=20,Label="Supply",Kind="Pipe"}},cat,kind);
+            var nodes=Descendants(w).OfType<FrameworkElement>().ToList();
+            var card=nodes.OfType<Expander>().Single();
+            var level=nodes.OfType<ComboBox>().Single(c=>c.Name=="GroupCurveLevel");
+            Assert(Descendants(card).Contains(level),"Level belongs inside the source group card: "+kind);
+            var levelGrid=(Grid)((FrameworkElement)level.Parent).Parent;
+            Assert(levelGrid.ColumnDefinitions[0].Width.Value==70 && level.MinHeight==46 && level.FontSize==16,"Level uses the same icon and full-size field as Type: "+kind);
+            if(kind=="CableTray") {
+                var service=nodes.OfType<ComboBox>().Single(c=>c.Name=="GroupServiceFollowMode");
+                var serviceGrid=(Grid)((FrameworkElement)service.Parent).Parent;
+                Assert(serviceGrid.ColumnDefinitions[0].Width.Value==70 && service.MinHeight==46,"Cable Tray Service Type uses the same icon/field layout");
+                service.SelectedIndex=1;nodes.OfType<TextBox>().Single(c=>c.Name=="GroupServiceType").Text="Emergency";
+            }
+            if(output!=null)Render(w,output,kind+"-manual-unified.png",1440,900);
+            var mode=nodes.OfType<ComboBox>().Single(c=>c.Name=="CurveSetupMode");mode.SelectedIndex=1;
+            Assert(level.Visibility==Visibility.Visible && !level.IsEnabled && ((ReplacementLevelOption)level.SelectedItem).Label.Contains("Level 1"),"Auto keeps the resolved Level selector visible in its card: "+kind);
+            if(kind=="CableTray")Assert(nodes.OfType<ComboBox>().Single(c=>c.Name=="ResolvedServiceChoice").Visibility==Visibility.Visible,"Auto keeps the styled service selector visible");
+            if(output!=null)Render(w,output,kind+"-auto-unified.png",1440,900);
+            mode.SelectedIndex=0;
+            if(kind=="CableTray")Assert(nodes.OfType<ComboBox>().Single(c=>c.Name=="GroupServiceFollowMode").SelectedIndex==1 && nodes.OfType<TextBox>().Single(c=>c.Name=="GroupServiceType").Text=="Emergency","Service policy and value survive switching Auto then Manual");
+            w.Close();
+        }
+        var dlevels=new List<DuctChoice>{new DuctChoice{Id=1,Name="Level 1"},new DuctChoice{Id=2,Name="Level 2"}};
+        var systems=new List<DuctChoice>{new DuctChoice{Id=20,Name="Supply Air"}};
+        var typesD=new List<DuctChoice>{new DuctChoice{Id=10,Name="Standard duct"}};
+        var first=Item("1",false,"Supply Air","Level 1");first.Source.Name="Standard duct";
+        var second=Item("2",true,"Supply Air","Level 1");second.Source.Name="Standard duct";
+        var d=new DuctCreationWindow(new List<DuctPlanItem>{first,second},new List<string>(),typesD,typesD,systems,dlevels,new List<DuctChoice>(),new DuctSettingsData());
+        var dn=Descendants(d).OfType<FrameworkElement>().ToList();
+        var cards=dn.OfType<Expander>().Where(e=>e.GetType().Name=="DuctGroupEditor").ToList();
+        Assert(cards.Count==2 && cards.All(e=>Descendants(e).OfType<ComboBox>().Any(c=>c.Name=="GroupLevel")),"Every Duct shape/system card contains Level, including a shared source level");
+        foreach(var c in cards)c.IsExpanded=true;
+        var boxes=dn.OfType<ComboBox>().Where(c=>c.Name=="GroupLevel").ToList();
+        Assert(boxes.All(c=>c.MinHeight==46 && ((Grid)((FrameworkElement)c.Parent).Parent).ColumnDefinitions[0].Width.Value==70),"Duct Level uses the same full field design as System and Duct Type");
+        boxes[0].SelectedItem=dlevels[1];
+        Assert(boxes.All(c=>((DuctChoice)c.SelectedItem).Id==2),"Duplicated source-level selectors stay synchronized across duct cards");
+        var dm=dn.OfType<ComboBox>().Single(c=>c.Name=="SystemSetupMode");dm.SelectedIndex=1;
+        Assert(boxes.All(c=>c.Visibility==Visibility.Visible && !c.IsEnabled && ((DuctChoice)c.SelectedItem).Name.Contains("Level 1")),"Duct Auto displays resolved Follow IFC Level inside each group");
+        dm.SelectedIndex=0;
+        Assert(boxes.All(c=>((DuctChoice)c.SelectedItem).Id==2 && c.IsEnabled),"Duct Manual level overrides survive Auto and back");
+        d.SubmitEmbedded=value=>{};
+        dn.OfType<Button>().Single(b=>(b.Content as string)=="Create 2 Duct").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(d.Request!=null && d.Request.Levels["Level 1"]==2,"Duct submit carries the synchronized manual level mapping");d.Close();
+        // One fully expanded card for a clear rendered comparison with Pipe/Cable Tray.
+        var renderDuct=new DuctCreationWindow(new List<DuctPlanItem>{first},new List<string>(),typesD,typesD,systems,dlevels,new List<DuctChoice>(),new DuctSettingsData());
+        if(output!=null)Render(renderDuct,output,"Duct-manual-unified.png",1440,900);
+        Descendants(renderDuct).OfType<ComboBox>().Single(c=>c.Name=="SystemSetupMode").SelectedIndex=1;
+        if(output!=null)Render(renderDuct,output,"Duct-auto-unified.png",1440,900);renderDuct.Close();
+    }
+
+    private static void TestCurveLevels()
+    {
+        Assert(CurveCreationWindow.SourceIssue(new AirTerminalRow{ElementId="9",NativeShape="Round"},"CableTray").Contains("IFC category"),"Round conduit imported into Cable Trays is reported before creation");
+        var levels=new List<ReplacementLevelOption>{new ReplacementLevelOption{Id=1,Label="L1",ElevationMm=0},new ReplacementLevelOption{Id=2,Label="L2",ElevationMm=4000}};
+        Assert(CurveLevelResolver.Resolve(new AirTerminalRow{SourceLevelName="L2"},levels)?.Id==2,"Follow IFC matches the source level name");
+        Assert(CurveLevelResolver.Resolve(new AirTerminalRow{HostLevelElevationMm=4000},levels)?.Id==2,"Follow IFC matches transformed source level elevation");
+        Assert(CurveLevelResolver.Resolve(new AirTerminalRow{HostCenterElevationMm=4800},levels)?.Id==2,"Missing source level uses host-coordinate centerline floor");
+        Assert(CurveLevelResolver.Resolve(new AirTerminalRow{HostLevelElevationMm=9000},levels)==null,"Known missing storey requires an explicit mapping");
+        Assert(CurveLevelResolver.Resolve(new AirTerminalRow(),levels)==null,"No IFC level/elevation never defaults to the first level");
+        Assert(CurveLevelResolver.Resolve(new AirTerminalRow{HostCenterElevationMm=-500},levels)==null,"Below all host levels remains unresolved");
+        Assert(CurveLevelResolver.Resolve(new AirTerminalRow{HostLevelElevationMm=0},levels.Concat(new[]{new ReplacementLevelOption{Id=3,Label="Duplicate",ElevationMm=0}}))==null,"Coincident levels are not chosen arbitrarily");
+        var trayCategory=(long)Autodesk.Revit.DB.BuiltInCategory.OST_CableTray;
+        var traySource=new AirTerminalRow{ElementId="77",Name="Cable Tray with Fittings-Default-973916",SourceLevelName="L1",DuctSource=new IfcTerminalSource{TypeName="Cable Tray with Fittings:Default",WidthMm=304.8,HeightMm=101.6}};
+        var trayTypes=new List<ReplacementTypeOption>{new ReplacementTypeOption{Id=70,Label="Other Family : Default",Kind="CableTray",CategoryId=trayCategory,Supported=true},new ReplacementTypeOption{Id=71,Label="Cable Tray with Fittings : Default",Kind="CableTray",CategoryId=trayCategory,Supported=true}};
+        var trayWindow=new CurveCreationWindow(new List<AirTerminalRow>{traySource},trayTypes,levels,new List<ReplacementTypeOption>(),trayCategory,"CableTray");
+        var trayNodes=Descendants(trayWindow).OfType<FrameworkElement>().ToList();
+        trayNodes.OfType<ComboBox>().Single(c=>c.Name=="CurveSetupMode").SelectedIndex=1;
+        Assert(((ReplacementTypeOption)trayNodes.OfType<ComboBox>().Single(c=>c.Name=="GroupCurveType").SelectedItem).Id==71,"Follow IFC matches exact source family/type instead of numeric instance name or another Default type");
+        traySource.NativeShape="Round";
+        trayNodes.OfType<Button>().Single(b=>b.Name=="ReviewCurveSettings").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(!trayNodes.OfType<Button>().Single(b=>b.Name=="CreateCurve").IsEnabled,"Mismatched round source disables tray creation before a transaction");
+        trayWindow.Close();
+        foreach(string kind in new[]{"Pipe","CableTray","Conduit"}) {
+            long cat=(long)(kind=="Pipe"?Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves:kind=="CableTray"?Autodesk.Revit.DB.BuiltInCategory.OST_CableTray:Autodesk.Revit.DB.BuiltInCategory.OST_Conduit);
+            var rows=new List<AirTerminalRow>{new AirTerminalRow{ElementId="1",Name="T",SourceLevelName="L1",SystemType="Water",ServiceType="Power"},new AirTerminalRow{ElementId="2",Name="T",SourceLevelName="L2",SystemType="Water",ServiceType="Data"}};
+            var w=new CurveCreationWindow(rows,new List<ReplacementTypeOption>{new ReplacementTypeOption{Id=10,Label="T",Kind=kind,CategoryId=cat,Supported=true}},levels,new List<ReplacementTypeOption>{new ReplacementTypeOption{Id=20,Label="Water",Kind="Pipe"}},cat,kind);
+            var nodes=Descendants(w).OfType<FrameworkElement>().ToList();
+            var mode=nodes.OfType<ComboBox>().Single(c=>c.Name=="CurveSetupMode");
+            var shared=nodes.OfType<ComboBox>().Single(c=>c.Name=="SharedCurveLevel");
+            var groups=nodes.OfType<ComboBox>().Where(c=>c.Name=="GroupCurveLevel").ToList();
+            Assert(groups.Count==2 && groups.All(c=>((ReplacementLevelOption)c.SelectedItem).Id==0 && c.IsEnabled),"Manual has Follow IFC for each source level: "+kind);
+            if(kind=="CableTray")Assert(nodes.OfType<ComboBox>().Where(c=>c.Name=="GroupServiceFollowMode").All(c=>(c.SelectedItem as ServiceTypeChoice)?.Kind=="Existing" && c.IsEnabled),"Cable Tray Manual explicitly follows each source service");
+            groups[0].SelectedItem=levels[1];
+            mode.SelectedIndex=1;
+            Assert(shared.IsEnabled && ((ReplacementLevelOption)shared.SelectedItem).Id==0 && groups.All(c=>!c.IsEnabled),"Auto defaults to shared Follow IFC: "+kind);
+            ReplacementRequest request=null;w.SubmitEmbedded=value=>request=value;
+            nodes.OfType<Button>().Single(b=>b.Name=="ReviewCurveSettings").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            nodes.OfType<Button>().Single(b=>b.Name=="CreateCurve").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert(request!=null && request.SourceLevelIds["1"]==1 && request.SourceLevelIds["2"]==2,"One run carries different source levels: "+kind);
+            shared.SelectedItem=levels[0];w.RefreshConfirmation();
+            nodes.OfType<Button>().Single(b=>b.Name=="CreateCurve").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert(request.SourceLevelIds.Values.All(id=>id==1),"Explicit Auto level overrides all sources: "+kind);
+            mode.SelectedIndex=0;
+            Assert(((ReplacementLevelOption)groups[0].SelectedItem).Id==2 && ((ReplacementLevelOption)groups[1].SelectedItem).Id==0,"Auto to Manual restores individual level choices: "+kind);
+            rows[1].SourceLevelName="Missing";rows[1].HostLevelElevationMm=9000;w.RefreshConfirmation();
+            Assert(!nodes.OfType<Button>().Single(b=>b.Name=="CreateCurve").IsEnabled,"Unresolved Follow IFC level blocks creation: "+kind);
+            w.Close();
+        }
+    }
+    private static void TestCurveGroupModes()
+    {
+        Assert(CurveCreationWindow.SourceService(new AirTerminalRow{SystemType="Not a service"})=="","Cable Tray service must not be inferred from IFC system type");
+        var source=new AirTerminalRow{IfcProperties=new List<IfcPropertyValue>{new IfcPropertyValue{Name="Service Type",Value="Power"}}};
+        Assert(CurveCreationWindow.SourceService(source)=="Power","Cable Tray reads an explicit IFC service property");
+        source.ServiceType="Data";Assert(CurveCreationWindow.SourceService(source)=="Data","Native source Service Type takes precedence over IFC fallback");
+        foreach(string kind in new[]{"Pipe","CableTray"})
+        {
+            long category=(long)(kind=="Pipe"?Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves:Autodesk.Revit.DB.BuiltInCategory.OST_CableTray);
+            var rows=new List<AirTerminalRow>{new AirTerminalRow{ElementId="1",Name="A",SourceLevelName="L1",SystemType="Supply",ServiceType="Power"},new AirTerminalRow{ElementId="2",Name="B",SourceLevelName="L1",SystemType="Return",ServiceType="Data"}};
+            var types=new List<ReplacementTypeOption>{new ReplacementTypeOption{Id=10,Label="A",Kind=kind,CategoryId=category,Supported=true},new ReplacementTypeOption{Id=11,Label="B",Kind=kind,CategoryId=category,Supported=true}};
+            var systems=new List<ReplacementTypeOption>{new ReplacementTypeOption{Id=20,Label="Supply",Kind="Pipe"},new ReplacementTypeOption{Id=21,Label="Return",Kind="Pipe"}};
+            var window=new CurveCreationWindow(rows,types,new List<ReplacementLevelOption>{new ReplacementLevelOption{Id=1,Label="L1"}},systems,category,kind);
+            var nodes=Descendants(window).OfType<FrameworkElement>().ToList();
+            var mode=nodes.OfType<ComboBox>().Single(c=>c.Name=="CurveSetupMode");
+            var common=nodes.OfType<ComboBox>().Single(c=>c.Name=="CurveType");
+            var groupTypes=nodes.OfType<ComboBox>().Where(c=>c.Name=="GroupCurveType").ToList();
+            Assert(groupTypes.Count==2 && groupTypes.All(c=>c.IsEnabled) && !common.IsEnabled,"Manual exposes independent source group types: "+kind);
+            mode.SelectedIndex=1;
+            Assert(nodes.OfType<TextBlock>().Where(t=>t.Name=="ResolvedIfcCurveType").All(t=>t.Visibility==Visibility.Visible && t.Text.StartsWith("Follow IFC → ")),"Follow IFC is explicit in resolved group type displays: "+kind);
+            common.SelectedItem=types[0];
+            Assert(common.IsEnabled && groupTypes.All(c=>!c.IsEnabled && ((ReplacementTypeOption)c.SelectedItem).Id==10),"Auto applies a shared type to all groups: "+kind);
+            if(kind=="CableTray") {
+                Assert(nodes.OfType<ComboBox>().Single(c=>c.Name=="ServiceFollowMode").SelectedIndex==0 && nodes.OfType<TextBlock>().Where(t=>t.Name=="ResolvedIfcService").All(t=>t.Visibility==Visibility.Visible && t.Text.StartsWith("Follow IFC → ")),"Cable Tray Auto explicitly follows source service in both shared and group UI");
+                var sharedChoice=nodes.OfType<ComboBox>().Single(c=>c.Name=="ServiceFollowMode");sharedChoice.SelectedItem=sharedChoice.Items.OfType<ServiceTypeChoice>().Single(v=>v.Kind=="New");
+                nodes.OfType<TextBox>().Single(t=>t.Name=="SharedServiceType").Text="Emergency";
+                Assert(nodes.OfType<ComboBox>().Where(t=>t.Name=="ResolvedServiceChoice" && t.Visibility==Visibility.Visible).All(t=>t.SelectedItem.ToString().Contains("Emergency")),"Auto cable tray service applies to each group without a system selector");
+            }
+            mode.SelectedIndex=0;
+            Assert(groupTypes.Select(c=>((ReplacementTypeOption)c.SelectedItem).Id).OrderBy(id=>id).SequenceEqual(new long[]{10,11}),"Returning to Manual restores group type choices: "+kind);
+            ReplacementRequest request=null;window.SubmitEmbedded=r=>request=r;
+            nodes.OfType<Button>().Single(b=>b.Name=="CreateCurve").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert(request==null,"Settings cannot directly create elements before final confirmation");
+            nodes.OfType<Button>().Single(b=>b.Name=="ReviewCurveSettings").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            var confirmation=nodes.OfType<TabControl>().Single(t=>t.Name=="CurveConfirmationTabs");
+            Assert(confirmation.SelectedIndex==1 && !Descendants((DependencyObject)((TabItem)confirmation.Items[0]).Content).OfType<DataGrid>().Any(),"Source table appears only in the final confirmation tab");
+            var reviewed=nodes.OfType<DataGrid>().Single(t=>t.Name=="CurvePreview");
+            Assert(reviewed.Items.Count==2 && (string)reviewed.Items[0].GetType().GetProperty("TargetType").GetValue(reviewed.Items[0],null)=="A","Final confirmation contains current target selections, not source data alone");
+            nodes.OfType<Button>().Single(b=>b.Name=="CreateCurve").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert(request!=null && request.SourceTypeIds["1"]==10 && request.SourceTypeIds["2"]==11,"Requests retain separate target types for source groups: "+kind);
+            if(kind=="CableTray")Assert(request.ServiceTypes["1"]=="Power" && request.ServiceTypes["2"]=="Data" && request.SystemTypeId==0,"Cable Tray request carries restored services and no native system ID");
+            else Assert(request.SourceSystemTypeIds["1"]==20 && request.SourceSystemTypeIds["2"]==21,"Pipe request carries a separate piping system for each source group");
+            window.Close();
+        }
+        var unresolved=new CurveCreationWindow(new List<AirTerminalRow>{new AirTerminalRow{ElementId="1",Name="Unmatched source"}},new List<ReplacementTypeOption>{new ReplacementTypeOption{Id=10,Label="Unrelated project type",Kind="Conduit",CategoryId=(long)Autodesk.Revit.DB.BuiltInCategory.OST_Conduit,Supported=true}},new List<ReplacementLevelOption>{new ReplacementLevelOption{Id=1,Label="L1"}},new List<ReplacementTypeOption>(),(long)Autodesk.Revit.DB.BuiltInCategory.OST_Conduit,"Conduit");
+        var unresolvedNodes=Descendants(unresolved).OfType<FrameworkElement>().ToList();
+        unresolvedNodes.OfType<ComboBox>().Single(c=>c.Name=="CurveSetupMode").SelectedIndex=1;
+        Assert(unresolvedNodes.OfType<ComboBox>().Single(c=>c.Name=="GroupCurveType").SelectedItem==null && unresolvedNodes.OfType<TextBlock>().Single(t=>t.Name=="ResolvedIfcCurveType").Text.Contains("no matching project type"),"Follow IFC does not silently use an unrelated sole project type");
+        unresolvedNodes.OfType<Button>().Single(b=>b.Name=="ReviewCurveSettings").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(!unresolvedNodes.OfType<Button>().Single(b=>b.Name=="CreateCurve").IsEnabled,"Final creation is disabled while a Follow IFC match remains unresolved");
+        unresolved.Close();
+    }
+    private static void TestExistingLineParameterTasks()
+    {
+        foreach(string task in new[]{"Transfer parameters","Update from IFC"})
+        foreach(long category in new[]{(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves,(long)Autodesk.Revit.DB.BuiltInCategory.OST_CableTray,(long)Autodesk.Revit.DB.BuiltInCategory.OST_Conduit})
+        {
+            var main=new IFCInfoWindow{Links=new List<LinkOption>{new LinkOption{Id=1,Name="Existing.ifc",IsLoaded=true}},Opacity=0,ShowInTaskbar=false};
+            var flags=BindingFlags.Instance|BindingFlags.NonPublic;
+            var choiceType=typeof(IFCInfoWindow).Assembly.GetType("IFCInfo.DashboardSelection");
+            var choice=Activator.CreateInstance(choiceType,true);choiceType.GetField("Task",flags).SetValue(choice,task);
+            typeof(IFCInfoWindow).GetProperty("DashboardChoice",flags).SetValue(main,choice,null);
+            int transfers=0,geometry=0;
+            main.LoadLink=link=> {
+                main.Categories=new List<CategoryOption>{new CategoryOption{Id=category,Name="Line",Kind="Line"}};
+                main.CheckParameterTarget=n=>"Ready";
+                main.TransferParameters=(rows,maps)=>{Assert(rows.Count==1 && maps.Count==1,"Existing line task transfers its highlighted row and validated mapping");transfers++;return "Updated";};
+                main.PrepareUpdates=rows=>{geometry++;throw new Exception("Non-duct parameter task must not prepare duct geometry");};
+                main.LoadCategory=c=>{main.CanCreateDucts=false;main.CanReplaceCategory=true;main.AirTerminalCount=1;main.AirTerminals=new List<AirTerminalRow>{new AirTerminalRow{ElementId="101"}};};
+            };
+            Exception failure=null;
+            main.Loaded+=(s,e)=>main.Dispatcher.BeginInvoke(new Action(()=> {
+                try {
+                    Descendants(main).OfType<ComboBox>().Single(c=>Equals(c.Tag,"Select IFC link...")).SelectedIndex=0;
+                    main.Categories[0].IsChecked=true;
+                    Descendants(main).OfType<Button>().Single(b=>Equals(b.Content,"Continue →")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    var workflow=Descendants(main).OfType<TabControl>().Single(t=>t.Name=="WorkflowTabs");
+                    Descendants((DependencyObject)((TabItem)workflow.Items[1]).Content).OfType<DataGrid>().Single(t=>t.Name!="IfcPropertyValues").SelectedItem=main.AirTerminals[0];
+                    Descendants(main).OfType<Button>().Single(b=>Equals(b.Content,"Next: Parameters →")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    var panel=((TabItem)workflow.Items[2]).Content;
+                    var pairs=(System.Collections.IList)panel.GetType().GetField("mappings",flags).GetValue(panel);
+                    pairs.Add(new IfcParameterMapping{Source="IFC Element ID",Target="IFC_ID"});
+                    Assert(((TabItem)workflow.Items[3]).Visibility==Visibility.Collapsed,"Existing non-duct parameter task exposes no geometry creation step");
+                    Descendants(main).OfType<Button>().Single(b=>Equals(b.Content,"Update parameter values")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    Assert(transfers==1 && geometry==0 && main.Replacement==null && main.DuctCreationRequest==null,"Existing parameter update does not create or replace geometry: "+task+" / "+category);
+                }catch(Exception ex){failure=ex;}finally{main.Close();}
+            }),DispatcherPriority.ApplicationIdle);
+            main.ShowDialog();if(failure!=null)throw failure;
+        }
+    }
+    private static void TestLineParameterRequests()
+    {
+        foreach(var entry in new[]{Tuple.Create("Pipe",(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves),Tuple.Create("CableTray",(long)Autodesk.Revit.DB.BuiltInCategory.OST_CableTray),Tuple.Create("Conduit",(long)Autodesk.Revit.DB.BuiltInCategory.OST_Conduit)})
+        {
+            var main=new IFCInfoWindow{Links=new List<LinkOption>{new LinkOption{Id=1,Name="Line.ifc",IsLoaded=true}},Opacity=0,ShowInTaskbar=false};
+            main.LoadLink=link=> {
+                main.Categories=new List<CategoryOption>{new CategoryOption{Id=entry.Item2,Name=entry.Item1,Kind="Line"}};
+                main.CheckParameterTarget=n=>"Ready";
+                main.LoadCategory=c=>{main.CanCreateDucts=false;main.CanReplaceCategory=true;main.AirTerminalCount=1;main.AirTerminals=new List<AirTerminalRow>{new AirTerminalRow{ElementId="101",Name="Line source",SystemType="IFC metadata"}};};
+            };
+            main.ReplacementTypes=new List<ReplacementTypeOption>{new ReplacementTypeOption{Id=10,CategoryId=entry.Item2,Kind=entry.Item1,Supported=true,Label="Target type"}};
+            main.ReplacementLevels=new List<ReplacementLevelOption>{new ReplacementLevelOption{Id=1,Label="L1"}};
+            main.ReplacementSystems=new List<ReplacementTypeOption>{new ReplacementTypeOption{Id=20,Kind="Pipe",Label="Water"}};
+            Exception failure=null;
+            main.Loaded+=(s,e)=>main.Dispatcher.BeginInvoke(new Action(()=> {
+                try {
+                    Descendants(main).OfType<ComboBox>().Single(c=>Equals(c.Tag,"Select IFC link...")).SelectedIndex=0;
+                    main.Categories[0].IsChecked=true;
+                    Descendants(main).OfType<Button>().Single(b=>Equals(b.Content,"Continue →")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    main.AirTerminals[0].IsSelected=true;
+                    Descendants(main).OfType<Button>().Single(b=>Equals(b.Content,"Next: Parameters →")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    var workflow=Descendants(main).OfType<TabControl>().Single(t=>t.Name=="WorkflowTabs");
+                    var panel=((TabItem)workflow.Items[2]).Content;
+                    Assert(((UIElement)panel).IsEnabled,"Line parameter editor is enabled: "+entry.Item1);
+                    Assert(Equals(((TabItem)workflow.Items[3]).Header,"Preview & Create"),"Line workflow uses the shared preview label: "+entry.Item1);
+                    var pairs=(System.Collections.IList)panel.GetType().GetField("mappings",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(panel);
+                    pairs.Add(new IfcParameterMapping{Source="IFC Element ID",Target="IFC_SourceId"});
+                    Descendants(main).OfType<Button>().Single(b=>Equals(b.Content,"Next: Preview & Create →")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    Assert(workflow.SelectedIndex==3 && main.OwnedWindows.Count==0,"Native line preview is embedded in the final tab without a modal window: "+entry.Item1);
+                    var nodes=Descendants((DependencyObject)((TabItem)workflow.Items[3]).Content).OfType<FrameworkElement>().ToList();
+                    var table=nodes.OfType<DataGrid>().Single(t=>t.Name=="CurvePreview");
+                    Assert(table.Columns.Any(c=>Equals(c.Header,"System Type"))==(entry.Item1=="Pipe"),"Only pipes show a native System Type column: "+entry.Item1);
+                    var embeddedContent=((TabItem)workflow.Items[3]).Content;
+                    var back=nodes.OfType<Button>().Single(b=>Equals(b.Content,"Back"));
+                    back.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    Assert(!back.IsCancel && workflow.SelectedIndex==2 && main.IsVisible,"Embedded Back returns to Parameters without closing the tool");
+                    workflow.SelectedIndex=3;
+                    Assert(ReferenceEquals(((TabItem)workflow.Items[3]).Content,embeddedContent),"Reopening Preview retains its embedded controls and selected settings");
+                    nodes.OfType<Button>().Single(b=>b.Name=="ReviewCurveSettings").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    Assert(workflow.SelectedIndex==4 && Equals(((TabItem)workflow.Items[4]).Header,"Review & Create"),"Curve confirmation is the fifth main workflow tab, not a nested tab: "+entry.Item1);
+                    nodes.OfType<Button>().Single(b=>b.Name=="CreateCurve").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    Assert(main.Replacement!=null && main.Replacement.ParameterMappings.Count==1 && main.Replacement.ParameterMappings[0].Target=="IFC_SourceId","Confirmed line creation request carries parameter mappings: "+entry.Item1);
+                    Assert(main.Replacement.SystemTypeId==(entry.Item1=="Pipe"?20:0),"CT and Conduit need no System Type when carrying mappings");
+                }catch(Exception ex){failure=ex;}finally{main.Close();}
+            }),DispatcherPriority.ApplicationIdle);
+            main.ShowDialog();if(failure!=null)throw failure;
+        }
+    }
+    private static void TestParameterCreationCleanup()
+    {
+        var main=new IFCInfoWindow();int created=0;
+        main.CreateParameter=(n,t,g,b)=>created++;
+        var panel=typeof(IFCInfoWindow).GetField("parameterPanel",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(main);
+        var pairs=(System.Collections.IList)panel.GetType().GetField("mappings",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(panel);
+        var draft=new IfcParameterMapping{Source="IFC GUID"};pairs.Add(draft);
+        var dialog=(Window)panel.GetType().GetMethod("BuildParameterDialog",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(panel,null);
+        Descendants(dialog).OfType<TextBox>().Single(t=>t.Name=="CreatedParameterName").Text="New manual parameter";
+        Descendants(dialog).OfType<Button>().Single(b=>Equals(b.Content,"Create")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(created==1 && !pairs.Cast<IfcParameterMapping>().Any(m=>string.IsNullOrWhiteSpace(m.Source)&&string.IsNullOrWhiteSpace(m.Target)),"Successful manual parameter creation removes placeholder rows");
+        Assert(pairs.Contains(draft),"Placeholder cleanup preserves incomplete source mapping drafts");
+        main.Close();
+    }
+    private static void TestSourceRefreshAndPipeParameters()
+    {
+        long duct=(long)Autodesk.Revit.DB.BuiltInCategory.OST_DuctCurves,pipe=(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves;
+        int refreshes=0,loads=0;
+        var main=new IFCInfoWindow{Links=new List<LinkOption>{new LinkOption{Id=1,Name="Refresh.ifc",IsLoaded=true}},Opacity=0,ShowInTaskbar=false};
+        main.RefreshLinks=()=>{refreshes++;return new List<LinkOption>{new LinkOption{Id=1,Name="Refreshed.ifc",IsLoaded=true},new LinkOption{Id=2,Name="New.ifc",IsLoaded=true}};};
+        main.LoadLink=link=> {
+            loads++;main.Categories=new List<CategoryOption>{new CategoryOption{Id=duct,Name="Ducts",Kind="Line"},new CategoryOption{Id=pipe,Name="Pipes",Kind="Line"}};
+            main.LoadCategory=category=> {main.CanCreateDucts=category.Id==duct;main.CanReplaceCategory=true;main.AirTerminalCount=1;main.AirTerminals=new List<AirTerminalRow>{new AirTerminalRow{ElementId="101",Name="Source"}};};
+        };
+        Exception failure=null;
+        main.Loaded+=(s,e)=>main.Dispatcher.BeginInvoke(new Action(()=> {
+            try {
+                var workflow=Descendants(main).OfType<TabControl>().Single(t=>t.Name=="WorkflowTabs");
+                var links=Descendants(main).OfType<ComboBox>().Single(c=>Equals(c.Tag,"Select IFC link..."));links.SelectedIndex=0;
+                main.UpdateLayout();
+                var refresh=Descendants(main).OfType<Button>().Single(b=>b.Name=="RefreshAllSources");
+                var sourceSurface=(FrameworkElement)((TabItem)workflow.Items[0]).Content;
+                var refreshPosition=refresh.TransformToAncestor(sourceSurface).Transform(new Point());
+                var linkPosition=links.TransformToAncestor(sourceSurface).Transform(new Point());
+                Assert(refreshPosition.Y<linkPosition.Y && refreshPosition.X>linkPosition.X+links.ActualWidth/2,"Source refresh is a normal button at the top right above the link picker");
+                foreach(var c in main.Categories)c.IsChecked=true;
+                Descendants(main).OfType<Button>().Single(b=>Equals(b.Content,"Continue →")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                var panel=typeof(IFCInfoWindow).GetField("parameterPanel",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(main);
+                var pairs=(System.Collections.IList)panel.GetType().GetField("mappings",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(panel);
+                pairs.Add(new IfcParameterMapping{Source="IFC GUID",Target="Duct draft"});
+                Descendants(main).OfType<ComboBox>().Single(c=>c.Name=="ReviewCategoryPicker").SelectedItem=main.ReviewCategories.Single(c=>c.Id==pipe);
+                workflow.SelectedIndex=2;
+                Assert(ReferenceEquals(((TabItem)workflow.Items[2]).Content,panel) && ((UIElement)panel).IsEnabled,"Pipe uses the enabled parameter editor with its own mappings");
+                workflow.SelectedIndex=1;
+                Assert(Descendants(main).OfType<Button>().Any(b=>Equals(b.Content,"Next: Parameters →") && b.IsVisible),"Pipe Elements goes to Parameters before preview and creation");
+                workflow.SelectedIndex=0;
+                Descendants(main).OfType<Button>().Single(b=>b.Name=="RefreshAllSources").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Assert(refreshes==1 && loads==2 && main.Links.Count==2 && main.SelectedLink.Name=="Refreshed.ifc","Source refresh reloads link catalog and selected link data");
+                Assert(main.Categories.All(c=>c.IsChecked),"Source refresh retains checked categories still present in the link");
+                Descendants(main).OfType<Button>().Single(b=>Equals(b.Content,"Continue →")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Assert(pairs.Cast<IfcParameterMapping>().Any(m=>m.Target=="Duct draft"),"Source refresh retains per-category duct parameter drafts");
+                workflow.SelectedIndex=2;
+                Assert(ReferenceEquals(((TabItem)workflow.Items[2]).Content,panel) && ((UIElement)panel).IsEnabled,"Returning from Pipe to Duct restores the enabled parameter panel");
+            } catch(Exception ex){failure=ex;}finally{main.Close();}
+        }),DispatcherPriority.ApplicationIdle);
+        main.ShowDialog();if(failure!=null)throw failure;
+    }
     private static void TestExpandedFamilyCategories()
     {
         foreach(var entry in new[]{Tuple.Create((long)Autodesk.Revit.DB.BuiltInCategory.OST_MechanicalEquipment,"Mechanical Equipment"),Tuple.Create((long)Autodesk.Revit.DB.BuiltInCategory.OST_DuctTerminal,"Air Terminals"),Tuple.Create((long)Autodesk.Revit.DB.BuiltInCategory.OST_ElectricalFixtures,"Electrical Fixtures"),Tuple.Create((long)Autodesk.Revit.DB.BuiltInCategory.OST_GenericModel,"Generic Models")})
@@ -86,7 +439,7 @@ internal static class Program
         var tools=Descendants((DependencyObject)panel).OfType<WrapPanel>().Single(p=>p.Name=="ParameterTools");
         var actions=tools.Children.OfType<Button>().Where(b=>b.ContextMenu!=null).SelectMany(b=>b.ContextMenu.Items.OfType<MenuItem>()).ToList();
         Assert(actions.Count==11 && tools.Children.Count==5 && actions.All(a=>a.ToolTip!=null),"Compact parameter menus retain all actions with hover names");
-        actions.Single(a=>Equals(a.Header,"Update existing ducts")).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        actions.Single(a=>Equals(a.Header,"Update existing elements")).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         Assert(transfers==1 && creations==0,"Update existing writes parameters through its separate action without creating geometry");
         var saved=(ParameterMappingPreset)panel.GetType().GetMethod("MappingPreset",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(panel,null);
         Assert(saved.Entries.Count==1 && saved.Entries[0].Source=="IFC GUID","Saving a loaded preset retains portable source names");
@@ -283,7 +636,7 @@ internal static class Program
         var binding=Descendants(creation).OfType<ComboBox>().Single(c=>c.Name=="CreatedParameterBinding");
         Assert(binding.SelectedItem as string=="Instance" && binding.Items.Count==2,"Parameter creation offers Instance and Type");
         binding.SelectedItem="Type";
-        Assert(binding.IsEnabled && Descendants(creation).OfType<TextBlock>().Any(t=>t.Text.Contains("existing ducts")),"Type binding remains editable and explains shared type effects");
+        Assert(binding.IsEnabled && Descendants(creation).OfType<TextBlock>().Any(t=>t.Text.Contains("existing elements")),"Type binding remains editable and explains shared type effects");
         creation.Close();
         var grid=(DataGrid)panel.GetType().GetField("grid",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(panel);
         Assert(grid.Columns.Count==5 && grid.Columns.OfType<DataGridTemplateColumn>().Count()==3,"Parameter table must have two choice columns and a mapping button");
@@ -367,9 +720,17 @@ internal static class Program
     {
         try
         {
+            if(args.Length==2 && args[0]=="--render-service-slope"){RenderServiceAndSlope(Path.GetFullPath(args[1]));Console.WriteLine("Rendered four service/slope previews without showing windows.");return 0;}
+            if(args.Length==2 && args[0]=="--render-settings") {
+                TestUnifiedSettings(Path.GetFullPath(args[1]));Console.WriteLine("PASS: "+checks+" layout checks; rendered without showing windows.");return 0;
+            }
+            if(args.Length==1 && args[0]=="--test-curves") {
+                TestCurveGroupModes();TestCurveLevels();TestUnifiedSettings();TestServicesAndSlope();
+                Console.WriteLine("PASS: "+checks+" curve checks; no windows shown.");return 0;
+            }
             if (args.Length == 1 && args[0] == "--test")
             {
-                TestExpandedFamilyCategories();TestStep2CategoryColumn();TestSourceBrowser(); TestProductivityTools(); TestBulkParameterCreation(); TestParameterMapping(); TestSelection(false);
+                TestCurveGroupModes();TestExistingLineParameterTasks();TestLineParameterRequests();TestParameterCreationCleanup();TestSourceRefreshAndPipeParameters();TestExpandedFamilyCategories();TestStep2CategoryColumn();TestSourceBrowser(); TestProductivityTools(); TestBulkParameterCreation(); TestParameterMapping(); TestSelection(false);
                 TestSelection(true);
                 TestResultSelection();
                 TestFamilyLoader();
@@ -404,6 +765,7 @@ internal static class Program
             var tabEditor=Settings(tabItems,false,Choices());
             tabPreview.OpenDuctSettings(tabEditor,r=>{});
             Render(tabPreview,output,"duct-settings-tabs.png",1500,850);
+            previewTabs.SelectedIndex=4;Render(tabPreview,output,"duct-final-main-tab.png",1500,850);previewTabs.SelectedIndex=3;
             tabPreview.AirTerminals[0].IfcProperties=new List<IfcPropertyValue> {
                 new IfcPropertyValue {Scope="Instance",SetName="Pset_DuctSegmentCommon",Name="Reference",Value="D-001",DataType="IFCLABEL"},
                 new IfcPropertyValue {Scope="Instance",SetName="Dimensions",Name="Width",Value="500",Unit="mm",DataType="IFCLENGTHMEASURE"}};
@@ -459,7 +821,11 @@ internal static class Program
                     new List<ReplacementTypeOption> { new ReplacementTypeOption { Id=1,CategoryId=category,Kind=kind,Supported=true,Label=kind+" Type" } },
                     new List<ReplacementLevelOption> { new ReplacementLevelOption { Id=2,Label="Level 1" } },
                     new List<ReplacementTypeOption> { new ReplacementTypeOption { Id=3,Kind="Pipe",Label="Domestic Cold Water" } },category,kind);
-                Render(curveWindow,output,kind+"-step3.png",900,690); curveWindow.Close();
+                Render(curveWindow,output,kind+"-step3.png",900,690);
+                var confirmation=Descendants(curveWindow).OfType<TabControl>().Single(t=>t.Name=="CurveConfirmationTabs");confirmation.SelectedIndex=1;
+                Render(curveWindow,output,kind+"-final-review.png",1100,760);confirmation.SelectedIndex=0;
+                Descendants(curveWindow).OfType<ComboBox>().Single(c=>c.Name=="CurveSetupMode").SelectedIndex=1;
+                Render(curveWindow,output,kind+"-follow-ifc.png",1100,760);curveWindow.Close();
             }
             var propertyPanel=new IfcPropertiesPanel();
             propertyPanel.ShowSource(new AirTerminalRow { ElementId="123",Name="Rectangular Duct",IfcGuid="ifc-source-guid",
@@ -616,7 +982,7 @@ internal static class Program
                 var resumePanel=((TabItem)resumeTabs.Items[2]).Content;
                 var resumePairs=(System.Collections.IList)resumePanel.GetType().GetField("mappings",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(resumePanel);
                 resumePairs.Clear();resumePairs.Add(new IfcParameterMapping{Source="IFC Element ID",Target="Target"});
-                Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Next: Create Ducts →")
+                Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Next: Preview & Create →")
                     .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             }));
             main.ShowDialog();
@@ -654,14 +1020,16 @@ internal static class Program
             Assert(((Button)nodes.Single(n=>n.Name=="CreateNative")).IsEnabled,"Valid native curve must be enabled: "+pair.Item1);
             Assert(((ComboBox)nodes.Single(n=>n.Name=="TargetSystem")).IsEnabled==(pair.Item1=="Pipe"),"Only Pipe requires piping system");
             window.Close();
-            var curve=new CurveCreationWindow(new List<AirTerminalRow> {new AirTerminalRow {ElementId="1",SystemType="Water"}},
+            var curve=new CurveCreationWindow(new List<AirTerminalRow> {new AirTerminalRow {ElementId="1",SourceLevelName="L1",SystemType="Water",ServiceType="Power"}},
                 new List<ReplacementTypeOption> {type},new List<ReplacementLevelOption> {new ReplacementLevelOption {Id=1,Label="L1"}},
                 systems,pair.Item2,pair.Item1) {Opacity=0,ShowInTaskbar=false};
             var curveNodes=Descendants(curve).OfType<FrameworkElement>().ToList();
-            Assert(curveNodes.OfType<ComboBox>().All(c=>c.MinHeight==36),"Curve settings must use compact fields");
-            Assert(curveNodes.OfType<ComboBox>().Count()==(pair.Item1=="Pipe"?4:3),"Only Pipe has a system mapping in curve step 3");
-            curve.Loaded+=(s,e)=>curve.Dispatcher.BeginInvoke(new Action(()=>
-                curveNodes.OfType<Button>().Single(b=>b.Name=="CreateCurve").RaiseEvent(new RoutedEventArgs(Button.ClickEvent))));
+            Assert(curveNodes.OfType<ComboBox>().All(c=>c.MinHeight>=36),"Curve settings retain readable shared and group field sizes");
+            Assert(curveNodes.OfType<ComboBox>().Count(c=>c.Name=="GroupPipeSystem")== (pair.Item1=="Pipe"?1:0),"Only Pipe has a group piping system selector");
+            Assert(curveNodes.OfType<TextBox>().Count(c=>c.Name=="GroupServiceType")== (pair.Item1=="CableTray"?1:0),"Cable Tray uses a separate service field instead of a system selector");
+            curve.Loaded+=(s,e)=>curve.Dispatcher.BeginInvoke(new Action(()=>{
+                curveNodes.OfType<Button>().Single(b=>b.Name=="ReviewCurveSettings").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                curveNodes.OfType<Button>().Single(b=>b.Name=="CreateCurve").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));}));
             curve.ShowDialog();
             Assert(curve.Request!=null && curve.Request.Kind==pair.Item1 && curve.Request.SourceCategoryId==pair.Item2,"Curve step 3 must preserve kind and category");
             Assert(curve.Request.SystemTypeId==(pair.Item1=="Pipe"?20:0),"Only Pipe must submit a system type");
@@ -848,6 +1216,10 @@ internal static class Program
         var grid=Descendants((DependencyObject)content).OfType<DataGrid>().Single();
         Assert(grid.Parent is Grid && Grid.GetRow(grid)==0 && Grid.GetColumn((Grid)grid.Parent)==0,"Include table must be fixed above right-side options");
         Assert(grid.Visibility==Visibility.Collapsed,"Create Ducts does not show another element selection table");
+        Assert(!Descendants((DependencyObject)content).OfType<Button>().Any(b=>Equals(b.Content,"Create 1 Duct")),"Embedded Duct settings exposes review navigation instead of direct creation");
+        tabs.SelectedIndex=4;
+        Assert(Descendants((DependencyObject)((TabItem)tabs.Items[4]).Content).OfType<DataGrid>().Any(t=>t.Name=="DuctFinalReview") && main.DuctCreationRequest==null,"Duct uses the fifth main tab for a read-only final summary without creating elements");
+        tabs.SelectedItem=settingsTab;
         tabs.SelectedItem=elements; tabs.SelectedItem=settingsTab;
         Assert(ReferenceEquals(settingsTab.Content,content),"Tab switching must preserve unchanged settings");
         int prepared=0;
@@ -866,12 +1238,12 @@ internal static class Program
             preparedWindow=Settings(new List<DuctPlanItem>{Item("456",false,"Supply Air","Level 1")},false,Choices());
             main.OpenDuctSettings(preparedWindow,r=>{});return null;
         };
-        Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Next: Create Ducts →").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Next: Preview & Create →").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Assert(tabs.SelectedItem==settingsTab && preparedWindow!=null,"Next opens duct settings when draft rows have no Revit target");
         tabs.SelectedItem=tabs.Items[2];
         main.CheckParameterTarget=n=>"Ready";
         var required=(IfcParameterMapping)pairs[pairs.Count-1];required.Target="Target";required.Source="IFC Element ID";
-        Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Next: Create Ducts →").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Next: Preview & Create →").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Assert(tabs.SelectedItem==settingsTab && preparedWindow!=null,"Next opens settings after both source and target are chosen");
         required.Target=null;
         bool executed=false;main.RunDuctCreation=()=>executed=true;
@@ -880,7 +1252,7 @@ internal static class Program
         executed=false;
         pairs.Clear();
         tabs.SelectedItem=tabs.Items[2];
-        Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Next: Create Ducts →").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Descendants(main).OfType<Button>().Single(b=>(b.Content as string)=="Next: Preview & Create →").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Assert(tabs.SelectedItem==settingsTab,"Next opens duct settings without adding parameters");
         var noParameters=new DuctRequest{Items=new List<DuctPlanItem>{Item("456",false,"Supply Air","Level 1")}};
         typeof(IFCInfoWindow).GetMethod("SubmitDuctRequest",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(main,new object[]{noParameters});
@@ -1072,6 +1444,7 @@ internal static class Program
                 var globalLevel=Descendants(window).OfType<ComboBox>().Single(c=>c.Name=="SharedLevel");
                 var groupLevels=Descendants(window).OfType<ComboBox>().Where(c=>c.Name=="GroupLevel").ToList();
                 Assert(globalLevel.IsEnabled && groupLevels.All(c=>!c.IsEnabled),"Auto level locks per-source controls and enables shared choice");
+                Assert(globalLevel.IsVisible && groupLevels.All(c=>!c.IsVisible),"Auto shows only the shared level picker, not duplicate source-level pickers");
                 if(globalLevel.Items.Count>1) {
                     globalLevel.SelectedIndex=1;long expected=((DuctChoice)globalLevel.SelectedItem).Id;
                     Assert(groupLevels.All(c=>((DuctChoice)c.SelectedItem).Id==expected),"Shared level applies immediately to every source level");
@@ -1092,6 +1465,8 @@ internal static class Program
                 mode.SelectedIndex=0;
                 Assert(!common.IsEnabled && groups.All(g=>Descendants(g).OfType<ComboBox>().Single(x=>x.Name=="GroupDuctType").IsEnabled),"Manual restores editable duct and system choices");
                 Assert(!globalLevel.IsEnabled && groupLevels.All(c=>c.IsEnabled),"Manual restores editable source levels");
+                Assert(!globalLevel.IsVisible && groupLevels.All(c=>c.IsVisible),"Manual shows only source-level mappings, not a disabled duplicate shared picker");
+                Assert(groupLevels.All(c=>c.TransformToAncestor(window).Transform(new Point()).X<window.ActualWidth/2),"Duct manual source-level mappings are placed in the left sidebar");
                 var projectBox=Descendants(newGroup).OfType<ComboBox>().Single(x=>x.Name=="GroupSystemType");
                 Assert(Descendants(newGroup).OfType<CheckBox>().Single(x=>x.Name=="CreateNewSystem").IsChecked==true && projectBox.SelectedItem==null,"Manual restores prior configuration");
                 submit.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

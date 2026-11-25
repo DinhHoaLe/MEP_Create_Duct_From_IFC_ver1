@@ -14,7 +14,7 @@ namespace IFCInfo
         internal static IEnumerable<ParameterOption> BuiltInComments()
         {
             foreach(var id in new[]{BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS,BuiltInParameter.ALL_MODEL_TYPE_COMMENTS})
-                yield return new ParameterOption {Name=LabelUtils.GetLabelFor(id),Id=SpecTypeId.String.Text.TypeId,DataKind="text",Discipline=SpecLabel(SpecTypeId.String.Text),Binding=id==BuiltInParameter.ALL_MODEL_TYPE_COMMENTS?"Type":"Instance",Categories="Ducts (built-in)"};
+                yield return new ParameterOption {Name=LabelUtils.GetLabelFor(id),Id=SpecTypeId.String.Text.TypeId,DataKind="text",Discipline=SpecLabel(SpecTypeId.String.Text),Binding=id==BuiltInParameter.ALL_MODEL_TYPE_COMMENTS?"Type":"Instance",Categories="MEP line elements (built-in)"};
         }
         static BuiltInParameter? CommentId(string name)
         {
@@ -68,7 +68,7 @@ namespace IFCInfo
             });
             return "Transferred "+written+" value(s) to "+pairs.Count+" existing duct(s). "+missing+" source value(s) missing; those targets were unchanged. Geometry was unchanged.";
         }
-        static bool IsTypeTarget(Document doc,string name)
+        internal static bool IsTypeTarget(Document doc,string name)
         {
             if(CommentId(name)==BuiltInParameter.ALL_MODEL_TYPE_COMMENTS)return true;
             var it=doc.ParameterBindings.ForwardIterator();while(it.MoveNext())if(it.Key.Name==name)return it.Current is TypeBinding;
@@ -76,7 +76,7 @@ namespace IFCInfo
         }
         internal static List<ParameterValuePreview> Preview(Document doc,RevitLinkInstance link,List<AirTerminalRow> sources,List<IfcParameterMapping> mappings)
         {
-            var tracked=DuctCreation.TrackedDucts(doc);var result=new List<ParameterValuePreview>();
+            var tracked=LineParameterTransfer.TrackedLines(doc);var result=new List<ParameterValuePreview>();
             foreach(var source in sources)
             foreach(var map in mappings.Where(m=>m.Applies(source)))
             {
@@ -88,10 +88,11 @@ namespace IFCInfo
                     long id;if(!long.TryParse(source.ElementId,out id))throw new InvalidOperationException("Invalid source ID.");
                     var element=link.GetLinkDocument()?.GetElement(ElementIds.Create(id));if(element==null)throw new InvalidOperationException("Source no longer exists.");
                     string key=link.UniqueId+"|"+(string.IsNullOrWhiteSpace(source.IfcGuid)?element.UniqueId:source.IfcGuid);
-                    List<Autodesk.Revit.DB.Mechanical.Duct> targets;
+                    List<Element> targets;
                     tracked.TryGetValue(key,out targets);
-                    if(targets!=null && targets.Count>1)throw new InvalidOperationException("Multiple tracked ducts; resolve duplicate tracking before transfer.");
+                    if(targets!=null && targets.Count>1)throw new InvalidOperationException("Multiple tracked targets; resolve duplicate tracking before transfer.");
                     var duct=targets?.SingleOrDefault();
+                    if(duct!=null && duct.Category?.Id!=element.Category?.Id)throw new InvalidOperationException("Tracked target category differs from source.");
                     Parameter parameter=null;
                     if(duct!=null)
                     {
@@ -120,19 +121,19 @@ namespace IFCInfo
                     else if(type==SpecTypeId.Int.Integer)int.Parse(value,System.Globalization.CultureInfo.InvariantCulture);
                     else if(type==SpecTypeId.Number)double.Parse(value,System.Globalization.CultureInfo.InvariantCulture);
                     else if(type==SpecTypeId.Boolean.YesNo && !new[]{"TRUE","FALSE",".T.",".F.","1","0"}.Contains(value.Trim().ToUpperInvariant()))throw new InvalidOperationException("Invalid Yes/No value.");
-                    string state=Check(doc,map.Target);
+                    string state=Check(doc,map.Target,(BuiltInCategory)element.Category.Id.Number());
                     row.Status=state!="Ready"?state=="Missing"?"Target parameter is missing; create it first":state
-                        :duct==null?"New duct; no tracked target yet":IsTypeTarget(doc,map.Target)?"Ready; shared Type value":"Ready to update existing duct";
+                        :duct==null?"New element; no tracked target yet":IsTypeTarget(doc,map.Target)?"Ready; shared Type value":"Ready to update existing element";
                 }
                 catch(Exception ex){row.Status=ex.Message;}
             }
             foreach(var group in result.Where(r=>r.TypeParameter && r.TargetTypeId>0 && r.Status.StartsWith("Ready"))
                 .GroupBy(r=>r.TargetTypeId+"|"+r.RevitParameter))
                 if(group.Select(r=>r.ProposedValue).Distinct().Count()>1)
-                    foreach(var row in group)row.Status="Conflicting IFC values for shared Type; use Instance or separate Duct Types.";
+                    foreach(var row in group)row.Status="Conflicting IFC values for shared Type; use Instance or separate target types.";
             return result;
         }
-        internal static string Check(Document doc,string name)
+        internal static string Check(Document doc,string name,BuiltInCategory category=BuiltInCategory.OST_DuctCurves)
         {
             if(CommentId(name).HasValue)return "Ready";
             var found=new List<Definition>(); var it=doc.ParameterBindings.ForwardIterator();
@@ -140,22 +141,40 @@ namespace IFCInfo
             {
                 if(it.Key.Name!=name)return "Use the exact target name: "+it.Key.Name;
                 var binding=it.Current as ElementBinding;
-                if(binding==null || !binding.Categories.Contains(doc.Settings.Categories.get_Item(BuiltInCategory.OST_DuctCurves)))return "Parameter is not bound to Ducts";
+                if(binding==null || !binding.Categories.Contains(doc.Settings.Categories.get_Item(category)))return "Parameter is not bound to selected category";
                 found.Add(it.Key);
             }
             if(found.Count>1)return "Ambiguous target name";
             if(found.Count==1)return Supported(found[0].GetDataType()) ? "Ready" : "This data type is not yet supported for IFC transfer";
             // Built-in names must not be shadowed by a new project parameter.
-            foreach(var duct in new FilteredElementCollector(doc).OfClass(typeof(Autodesk.Revit.DB.Mechanical.Duct)))
+            foreach(var duct in new FilteredElementCollector(doc).OfCategory(category).WhereElementIsNotElementType())
                 if(duct.GetParameters(name).Count>0)return "Existing built-in parameter; choose a project Text parameter";
             return "Missing";
         }
-        internal static void Ensure(Document doc,List<IfcParameterMapping> mappings)
+        internal static void Ensure(Document doc,List<IfcParameterMapping> mappings,BuiltInCategory category=BuiltInCategory.OST_DuctCurves)
         {
             foreach(var map in mappings)
             {
-                string status=Check(doc,map.Target);
+                string status=Check(doc,map.Target,category);
                 if(status=="Ready")continue;
+                if(status=="Parameter is not bound to selected category" && map.CreateMissing)
+                {
+                    var iterator=doc.ParameterBindings.ForwardIterator();
+                    while(iterator.MoveNext())if(iterator.Key.Name==map.Target)
+                    {
+                        var binding=iterator.Current as ElementBinding;
+                        if(binding==null || iterator.Key.GetDataType()!=TypeId(map.ParameterType) || (iterator.Current is TypeBinding)!=(map.ParameterBinding=="Type"))
+                            throw new InvalidOperationException("Existing parameter has a different data type or binding: "+map.Target);
+                        var categories=doc.Application.Create.NewCategorySet();
+                        foreach(Category existing in binding.Categories)categories.Insert(existing);
+                        categories.Insert(doc.Settings.Categories.get_Item(category));
+                        var definition=iterator.Key;
+                        if(!doc.ParameterBindings.ReInsert(definition,map.ParameterBinding=="Type"?(Binding)doc.Application.Create.NewTypeBinding(categories):doc.Application.Create.NewInstanceBinding(categories),definition.GetGroupTypeId()))
+                            throw new InvalidOperationException("Cannot extend parameter binding: "+map.Target);
+                        break;
+                    }
+                    continue;
+                }
                 if(status!="Missing" || !map.CreateMissing)throw new InvalidOperationException(map.Target+": "+status);
                 var app=doc.Application; string old=app.SharedParametersFilename;
                 string temp=Path.Combine(Path.GetTempPath(),"IFC-Parameters-"+Guid.NewGuid()+".txt");
@@ -164,7 +183,7 @@ namespace IFCInfo
                     File.WriteAllText(temp,""); app.SharedParametersFilename=temp;
                     var file=app.OpenSharedParameterFile();
                     var definition=file.Groups.Create("IFC mapped parameters").Definitions.Create(new ExternalDefinitionCreationOptions(map.Target,TypeId(map.ParameterType)));
-                    var categories=app.Create.NewCategorySet(); categories.Insert(doc.Settings.Categories.get_Item(BuiltInCategory.OST_DuctCurves));
+                    var categories=app.Create.NewCategorySet(); categories.Insert(doc.Settings.Categories.get_Item(category));
                     if(!doc.ParameterBindings.Insert(definition,map.ParameterBinding=="Type"?(Binding)app.Create.NewTypeBinding(categories):app.Create.NewInstanceBinding(categories),map.ParameterGroup.StartsWith("autodesk.")?new ForgeTypeId(map.ParameterGroup):map.ParameterGroup=="Identity Data"?GroupTypeId.IdentityData:GroupTypeId.Data))throw new InvalidOperationException("Cannot bind parameter: "+map.Target);
                 }
                 finally {app.SharedParametersFilename=old; if(File.Exists(temp))File.Delete(temp);}

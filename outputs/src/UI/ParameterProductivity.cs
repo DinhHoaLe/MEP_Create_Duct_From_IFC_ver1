@@ -19,7 +19,7 @@ namespace IFCInfo
         internal void RestoreRows(IEnumerable<IfcParameterMapping> rows)
         {
             updatingPair=true;
-            try{mappings.Clear();foreach(var row in CopyRows(rows)){if(!string.IsNullOrWhiteSpace(row.Target))proposedTargets.Add(row.Target);mappings.Add(row);}if(mappings.Count==0)mappings.Add(new IfcParameterMapping());}
+            try{mappings.Clear();proposedTargets.Clear();foreach(var row in CopyRows(rows)){if(!string.IsNullOrWhiteSpace(row.Target))proposedTargets.Add(row.Target);mappings.Add(row);}if(mappings.Count==0)mappings.Add(new IfcParameterMapping());}
             finally{updatingPair=false;}
             Refresh();
         }
@@ -97,7 +97,7 @@ namespace IFCInfo
             var dialog=new Window{Title="Preview parameter values",Width=1150,Height=600,MaxHeight=SystemParameters.WorkArea.Height,MaxWidth=SystemParameters.WorkArea.Width,Background=UiDesign.Background,WindowStartupLocation=WindowStartupLocation.CenterOwner};
             if(Window.GetWindow(this)?.IsVisible==true)dialog.Owner=Window.GetWindow(this);
             var root=new DockPanel{Margin=new Thickness(20)};
-            var note=new TextBlock{Text=values.Count+" values. Read-only preview; no parameters are written. Highlight rows in Elements to preview existing ducts. Length values require resolved IFC units. Type parameters affect every duct using that type.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,12)};DockPanel.SetDock(note,Dock.Top);root.Children.Add(note);
+            var note=new TextBlock{Text=values.Count+" values. Read-only preview; no parameters are written. Current/proposed values use tracked Duct, Pipe, Cable Tray and Conduit targets. Length values require resolved IFC units. Type parameters affect every element using that type.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,12)};DockPanel.SetDock(note,Dock.Top);root.Children.Add(note);
             var close=IFCInfoWindow.Button("Close",false);close.Click+=(s,e)=>dialog.Close();DockPanel.SetDock(close,Dock.Bottom);root.Children.Add(close);
             var table=new DataGrid{Name="ParameterValuePreview",ItemsSource=values,IsReadOnly=true,AutoGenerateColumns=false,CanUserAddRows=false,CanUserDeleteRows=false};
             foreach(var column in new[]{new[]{"Source ID","SourceId"},new[]{"Target ID","TargetId"},new[]{"IFC property","IFCProperty"},new[]{"Revit parameter","RevitParameter"},new[]{"Current value","CurrentValue"},new[]{"Proposed value","ProposedValue"},new[]{"Status","Status"}})

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace IFCInfo
 {
@@ -8,13 +8,18 @@ namespace IFCInfo
         public long TypeId { get; set; }
         public long SourceCategoryId { get; set; }
         public long LevelId { get; set; }
+        public Dictionary<string,long> SourceLevelIds {get;set;}=new Dictionary<string,long>();
         public double RotationDegrees { get; set; }
         public List<string> SourceIds { get; set; }
         public string Kind { get; set; } = "Family";
         public long SystemTypeId { get; set; }
         public Dictionary<string,long> SystemTypes { get; set; } = new Dictionary<string,long>();
+        public Dictionary<string,long> SourceTypeIds {get;set;}=new Dictionary<string,long>();
+        public Dictionary<string,long> SourceSystemTypeIds {get;set;}=new Dictionary<string,long>();
+        public Dictionary<string,string> ServiceTypes {get;set;}=new Dictionary<string,string>();
         public bool KeepSuccessful { get; set; }
         public double LengthMm { get; set; }
         public long TopLevelId { get; set; }
+        public List<IfcParameterMapping> ParameterMappings {get;set;}=new List<IfcParameterMapping>();
     }
 }

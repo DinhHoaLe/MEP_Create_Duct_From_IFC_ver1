@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -97,6 +97,8 @@ namespace IFCInfo
             var divider=body.Children.OfType<Border>().FirstOrDefault();if(divider!=null)body.Children.Remove(divider);
             body.Children.Add(new Border{Height=1,Background=IFCInfoWindow.Brush("#DDD6CE"),Margin=new Thickness(0,16,0,12)});
             body.Children.Add(ductField);body.Children.Add(newTypeNote);
+            foreach(var fieldGrid in body.Children.OfType<Grid>())fieldGrid.Margin=new Thickness(0,12,0,0);
+            foreach(var fieldGrid in systemPanel.Children.OfType<Grid>())fieldGrid.Margin=new Thickness(0,12,0,0);
         }
 
         private static ComboBox FollowDisplay(ComboBox original,string name)

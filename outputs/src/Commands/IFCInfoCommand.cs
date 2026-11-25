@@ -53,6 +53,12 @@ namespace IFCInfo
                     dialog.InitialLinkId = lastLinkId;
                     dialog.InitialCategoryId = lastCategoryId;
                     dialog.InitialReview=lastReview;
+                    dialog.RefreshLinks=()=>
+                    {
+                        links=IfcLinkCatalog.GetLinks(doc);
+                        PlacementCatalog.Configure(dialog,doc);
+                        return links;
+                    };
                     RevitLinkInstance selectedLink = null;
                     dialog.LoadLink = option =>
                     {
@@ -60,7 +66,7 @@ namespace IFCInfo
                         var link = doc.GetElement(ElementIds.Create(option.Id)) as RevitLinkInstance;
                         if (link?.GetLinkDocument() == null)
                             throw new InvalidOperationException("The link is unloaded.");
-                        CategoryReader.Configure(dialog, link.GetLinkDocument(), option);
+                        CategoryReader.Configure(dialog, link.GetLinkDocument(), option,link.GetTotalTransform());
                         dialog.Categories=dialog.Categories.Where(dashboardChoice.Includes).ToList();
                         DuctWorkflow.Configure(dialog, doc, link);
                         selectedLink = link;

@@ -14,11 +14,12 @@ namespace IFCInfo
   readonly ObservableCollection<string> targetChoices=new ObservableCollection<string>();
   readonly HashSet<string> proposedTargets=new HashSet<string>();
   readonly TextBlock status=new TextBlock {TextWrapping=TextWrapping.Wrap,Margin=new Thickness(8)};
-  readonly CheckBox createMissing=new CheckBox {Content="Create missing Text instance parameters during duct creation",Margin=new Thickness(6,12,6,12)};
+  readonly CheckBox createMissing=new CheckBox {Content="Create missing Text instance parameters during element creation",Margin=new Thickness(6,12,6,12)};
   readonly DataGrid grid;
  readonly TextBlock selectionSummary=new TextBlock {Margin=new Thickness(6),TextWrapping=TextWrapping.Wrap};
   internal Func<List<AirTerminalRow>> Sources;
   internal Func<List<AirTerminalRow>> SelectedSources;
+  internal Func<string> CategoryLabel;
   internal Func<List<string>> Targets;
   internal Func<string,string> CheckTarget; internal Action<string,string,string,string> CreateParameter; internal Func<List<ParameterOption>> Types,Groups,Catalog;
   internal Func<List<AirTerminalRow>,List<IfcParameterMapping>,string> Transfer;
@@ -29,7 +30,7 @@ namespace IFCInfo
    var top=new StackPanel();SetDock(top,Dock.Top);Children.Add(top);
 
    top.Children.Add(selectionSummary);
-   top.Children.Add(new TextBlock {Text="Optional: create ducts without adding parameters, or configure the values to transfer below.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(6)});
+   top.Children.Add(new TextBlock {Text="Optional: create line elements without adding parameters, or configure the values to transfer below.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(6)});
    var toolbar=new WrapPanel{Name="ParameterTools"};top.Children.Add(toolbar);
    var refresh=IFCInfoWindow.IconButton("Refresh parameters","M20,8 A8,8 0 1 0 20,16 M20,3 L20,9 L14,9");
    refresh.Name="RefreshParameterTools";refresh.Margin=new Thickness(6);refresh.Click+=(s,e)=>Refresh();toolbar.Children.Add(refresh);
@@ -40,8 +41,8 @@ namespace IFCInfo
        {"Import parameter CSV…",ImportParameterCsv},{"Export selected IFC CSV…",ExportSelectedParameterCsv},{"Export CSV template…",ExportParameterCsvTemplate}});
    AddActionMenu(toolbar,"Presets","Save or load a reusable mapping configuration",new Dictionary<string,Action>{
        {"Save mapping preset…",SaveMappingPreset},{"Load mapping preset…",LoadMappingPreset}});
-   AddActionMenu(toolbar,"Values","Preview values or update existing tracked ducts",new Dictionary<string,Action>{
-       {"Preview values…",PreviewValues},{"Update existing ducts",TransferExisting}});
+   AddActionMenu(toolbar,"Values","Preview values or update tracked line elements",new Dictionary<string,Action>{
+       {"Preview values…",PreviewValues},{"Update existing elements",TransferExisting}});
 
    var messageScroll=new ScrollViewer {Content=status,MaxHeight=115,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};top.Children.Add(messageScroll);
    grid=new DataGrid {ItemsSource=mappings,AutoGenerateColumns=false,CanUserAddRows=false,CanUserDeleteRows=false,RowHeight=48};
@@ -160,8 +161,8 @@ namespace IFCInfo
    var binding=UiDesign.Field(root,"Parameter binding","","Select binding",false,true);
    binding.Name="CreatedParameterBinding";binding.ItemsSource=new[]{"Instance","Type"};binding.SelectedIndex=0;
    var bindingNote=new TextBlock {TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,8,0,0)};root.Children.Add(bindingNote);
-   binding.SelectionChanged+=(s,e)=>bindingNote.Text=binding.SelectedIndex==1?"Type values also affect existing ducts that use the same Duct Type.":"";
-   root.Children.Add(new TextBlock {Text="Shared parameter · Ducts",Margin=new Thickness(0,12,0,0)});
+   binding.SelectionChanged+=(s,e)=>bindingNote.Text=binding.SelectedIndex==1?"Type values also affect existing elements that use the same target type.":"";
+   root.Children.Add(new TextBlock {Text="Shared parameter · "+(CategoryLabel?.Invoke()??"Line elements"),Margin=new Thickness(0,12,0,0)});
    var feedback=new TextBlock {TextWrapping=TextWrapping.Wrap};root.Children.Add(feedback);
    Action follow=()=> {
       bool auto=mode.SelectedIndex==1;sourcePanel.Visibility=auto?Visibility.Visible:Visibility.Collapsed;
@@ -192,6 +193,7 @@ namespace IFCInfo
        Refresh();
        if(mode.SelectedIndex==1 && selectedMap==null){selectedMap=NewMapping();selectedMap.Source=(string)source.SelectedItem;mappings.Add(selectedMap);}
        if(selectedMap!=null)selectedMap.Target=name.Text.Trim();
+       RemoveBlankRows();
        status.Text="Created: "+name.Text.Trim()+" · "+((ParameterOption)type.SelectedItem).Name;dialog.Close();
       } catch(Exception ex){feedback.Text=ex.Message;}
    });
@@ -278,6 +280,10 @@ namespace IFCInfo
    map.SourceType=types.Count==0?"Unknown":string.Join(", ",types.Select(FriendlyType).Distinct());
   }
   IfcParameterMapping NewMapping()=>new IfcParameterMapping();
+  void RemoveBlankRows()
+  {
+   foreach(var row in mappings.Where(m=>string.IsNullOrWhiteSpace(m.Source)&&string.IsNullOrWhiteSpace(m.Target)).ToList())mappings.Remove(row);
+  }
   internal void Refresh()
   {
    // Replace only changed catalog entries to preserve ComboBox selections and confirmed mappings.
@@ -301,14 +307,14 @@ namespace IFCInfo
    string error=Error(m,Sources?.Invoke()??new List<AirTerminalRow>());
    if(error!=null){status.Text=error;return;}
    if(mappings.Any(x=>x!=m&&x.IsMapped&&x.Selected&&!string.IsNullOrWhiteSpace(m.Target)&&string.Equals(x.Target,m.Target,StringComparison.OrdinalIgnoreCase)&&(x.ElementIds==null || m.ElementIds==null || x.ElementIds.Intersect(m.ElementIds).Any()))){status.Text="This Revit parameter is already mapped.";return;}
-   m.IsMapped=true;status.Text=m.Source+" → "+m.Target+". "+(CheckTarget?.Invoke(m.Target)=="Missing"?"Will create during duct creation.":"Ready.");
+   m.IsMapped=true;status.Text=m.Source+" → "+m.Target+". "+(CheckTarget?.Invoke(m.Target)=="Missing"?"Will create during element creation.":"Ready.");
   }
   string Error(IfcParameterMapping m,List<AirTerminalRow> rows)
   {
    if(string.IsNullOrWhiteSpace(m.Source)||string.IsNullOrWhiteSpace(m.Target))return "Select both IFC Property and Revit Parameter.";
    if(!CompatibleTarget(m,m.Target,rows))return "Choose a writable Revit parameter matching the IFC data type.";
    string state=CheckTarget?.Invoke(m.Target)??"Catalog unavailable";
-   if(state!="Ready"&&!(state=="Missing"&&m.CreateMissing))return m.Target+": "+(state=="Missing"?"Missing. Use Create parameter to add a Text instance parameter bound to Ducts.":state);
+   if(state!="Ready"&&!(state=="Missing"&&m.CreateMissing))return m.Target+": "+(state=="Missing"?"Missing. Use Create parameter to bind a parameter to the selected category.":state);
    try {var values=rows.Where(m.Applies).Select(r=>IfcParameterMapping.Read(r,m.Source)).ToList();if(!values.Any(v=>v!=null))return m.Source+": not found in the applicable IFC sources.";}catch(Exception ex){return ex.Message;}
    return null;
   }
@@ -331,7 +337,7 @@ namespace IFCInfo
    foreach(var m in active){string error=Error(m,rows);if(error!=null)errors.Add("Row "+(mappings.IndexOf(m)+1)+": "+error);}
    if(active.GroupBy(m=>m.Source).Any(g=>g.Count()>1))errors.Add("Each IFC property may be used only once.");
    if(active.Any(m=>active.Any(x=>x!=m&&!string.IsNullOrWhiteSpace(m.Target)&&string.Equals(x.Target,m.Target,StringComparison.OrdinalIgnoreCase)&&(x.ElementIds==null || m.ElementIds==null || x.ElementIds.Intersect(m.ElementIds).Any()))))errors.Add("Duplicate Revit target mappings.");
-   status.Text=errors.Count>0?string.Join("\n",errors):active.Count==0?"No parameters configured. You can continue and create ducts without parameter mapping.":active.Count+" parameter(s) will be assigned to "+rows.Count+" selected duct(s) when Create is clicked.";
+   status.Text=errors.Count>0?string.Join("\n",errors):active.Count==0?"No parameters configured. You can continue without parameter mapping.":active.Count+" parameter(s) will be assigned to "+rows.Count+" selected element(s) when Create is clicked.";
    if(errors.Count==0 && pending>0)status.Text+=" "+pending+" incomplete pair(s) will be skipped. Select both columns to transfer their values.";
    if(errors.Count>0)return false;
    if(request!=null)request.ParameterMappings=Snapshot(active);

@@ -18,7 +18,7 @@ namespace IFCInfo
         internal string Summary => Task + " / " + Discipline + " / " + (Kind == "Family" ? "Family Instance" : Kind);
         internal DashboardSelection Copy() => new DashboardSelection { Task=Task, Discipline=Discipline, Kind=Kind };
         internal bool Includes(CategoryOption category) => IsAvailable && category.Kind == Kind &&
-            (!(IsTransfer || IsUpdate) || category.Id == (long)Autodesk.Revit.DB.BuiltInCategory.OST_DuctCurves);
+            (!(IsTransfer || IsUpdate) || SupportedCategories.IsLine(category.Id));
     }
 
     // Dashboard navigation only: model actions remain in the existing workflow/services.
@@ -53,8 +53,8 @@ namespace IFCInfo
             var subtitle=IFCInfoWindow.Text("Choose a task, discipline and element kind. The workspace uses the existing tool screens.",16,"#716B63");subtitle.Margin=new Thickness(0,8,0,20);body.Children.Add(subtitle);
             AddGroup(body,"01 · Select a task","Task",new[]{
                 new[]{"Create from IFC","Create native elements using the current creation and placement screens."},
-                new[]{"Update from IFC","Update eligible tracked ducts using the existing update checks."},
-                new[]{"Transfer parameters","Transfer mapped IFC values to existing tracked ducts."},
+                new[]{"Update from IFC","Update duct geometry or mapped parameters on tracked MEP lines."},
+                new[]{"Transfer parameters","Transfer mapped IFC values to tracked Ducts, Pipes, Cable Trays and Conduits."},
                 new[]{"Review / Compare","Inspect IFC elements, properties, geometry and duct comparisons."}});
             AddGroup(body,"02 · Select a discipline","Discipline",new[]{
                 new[]{"MEP","Current scope · supported MEP categories and Generic Models."},
@@ -104,11 +104,11 @@ namespace IFCInfo
             }
             summary.Text=choice.Summary;
             scope.Text=choice.Discipline!="MEP"?"Planned: this discipline is not enabled in the current source code.":
-                (choice.IsTransfer || choice.IsUpdate) && choice.Kind!="Line"?"This task currently supports ducts only. Select Line to continue.":
-                choice.IsUpdate?"Ducts only. Highlight source rows in Elements; existing manual-edit and connection checks remain active.":
-                choice.IsTransfer?"Ducts only. Highlight source rows in Elements, configure Parameters, then transfer values without creating geometry.":
+                (choice.IsTransfer || choice.IsUpdate) && choice.Kind!="Line"?"Select Line to update Duct, Pipe, Cable Tray or Conduit parameters.":
+                choice.IsUpdate?"Highlight sources in Elements. Ducts support geometry updates; Pipe, Cable Tray and Conduit update mapped parameters only.":
+                choice.IsTransfer?"Highlight source rows in Elements, configure Parameters, then update tracked line parameter values without changing geometry.":
                 choice.IsReview?"Read-only workspace: element inspection, exports and existing duct comparison. Model-changing screens are disabled.":
-                "Source → Elements → Parameters → existing creation / placement settings. Parameter transfer currently applies to ducts.";
+                "Source → Elements → Parameters → Preview & Create. Create and transfer mapped parameters for all four line categories.";
             open.IsEnabled=choice.IsAvailable;
         }
     }

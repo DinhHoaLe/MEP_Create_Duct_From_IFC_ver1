@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
@@ -13,7 +13,7 @@ namespace IFCInfo
     /// <summary>Read categories and system parameters, then match IFC data by GUID.</summary>
     internal static class CategoryReader
     {
-        public static void Configure(IFCInfoWindow window, Document linkedDoc, LinkOption linkOption)
+        public static void Configure(IFCInfoWindow window, Document linkedDoc, LinkOption linkOption,Transform sourceTransform)
         {
             if (linkedDoc == null)
                 return;
@@ -34,10 +34,10 @@ namespace IFCInfo
                 if (preview!=null) previewCache[id]=preview;
                 return preview;
             };
-            window.LoadCategory = category => SetCategoryCount(window, linkedDoc, linkOption, category);
+            window.LoadCategory = category => SetCategoryCount(window, linkedDoc, linkOption, category,sourceTransform);
         }
 
-        private static void SetCategoryCount(IFCInfoWindow window, Document linkedDoc, LinkOption linkOption, CategoryOption category)
+        private static void SetCategoryCount(IFCInfoWindow window, Document linkedDoc, LinkOption linkOption, CategoryOption category,Transform sourceTransform)
         {
             string ifcPath = linkOption.IfcPath;
             window.AirTerminalCount = null;
@@ -101,6 +101,9 @@ namespace IFCInfo
                     foreach (Element element in terminals)
                     {
                         string guid = ReadIfcGuid(element);
+                        var sourceLevel=linkedDoc.GetElement(element.LevelId) as Level;
+                        var bounds=element.get_BoundingBox(null);
+                        double? hostCenter=bounds==null?(double?)null:sourceTransform.OfPoint(bounds.Transform.OfPoint((bounds.Min+bounds.Max)/2)).Z*304.8;
                         var connector = (element as MEPCurve)?.ConnectorManager.Connectors.Cast<Connector>()
                             .FirstOrDefault(c => c.ConnectorType == ConnectorType.End);
                         var row = new AirTerminalRow
@@ -109,6 +112,9 @@ namespace IFCInfo
                             CategoryId=category.Id,
                             CategoryName=element.Category?.Name??category.Name,
                             Name = element.Name,
+                            SourceLevelName=sourceLevel?.Name,
+                            HostLevelElevationMm=sourceLevel==null?(double?)null:sourceTransform.OfPoint(new XYZ(0,0,sourceLevel.ProjectElevation)).Z*304.8,
+                            HostCenterElevationMm=hostCenter,
                             IfcGuid = guid,
                             NativeShape = connector == null ? null : connector.Shape == ConnectorProfileType.Round ? "Round" :
                                 connector.Shape == ConnectorProfileType.Oval ? "Oval" : connector.Shape == ConnectorProfileType.Rectangular ?
@@ -116,6 +122,7 @@ namespace IFCInfo
                             SystemType = ReadSystemValue(element, category.Id==(long)BuiltInCategory.OST_PipeCurves
                                 ? BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM : BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM, "System Type"),
                             SystemName = ReadSystemValue(element, BuiltInParameter.RBS_SYSTEM_NAME_PARAM, "System Name"),
+                            ServiceType = category.Id==(long)BuiltInCategory.OST_CableTray?element.get_Parameter(BuiltInParameter.RBS_CTC_SERVICE_TYPE)?.AsString():null,
                             Elevation = "No information",
                             DataSource = ifc == null ? "Parameter Revit" : "No matching IFC GUID; using Revit parameters"
                         };
@@ -124,6 +131,7 @@ namespace IFCInfo
                         {
                             matched++;
                             row.DuctSource = sourceRow;
+                            if(string.IsNullOrWhiteSpace(row.SourceLevelName))row.SourceLevelName=sourceRow.LevelName;
                             row.IfcProperties = sourceRow.Properties;
                             if (!string.IsNullOrWhiteSpace(sourceRow.SystemName))
                                 row.SystemName = sourceRow.SystemName;
@@ -144,6 +152,10 @@ namespace IFCInfo
                             int split=name.IndexOf('.'); if (split<0) split=name.IndexOf(':');
                             row.IfcProperties.Add(new IfcPropertyValue { Scope=candidate.Id==element.Id ? "Revit link / Instance" : "Revit link / Type",
                                 SetName=split<0 ? "IFC parameter" : name.Substring(0,split),Name=split<0 ? name : name.Substring(split+1),Value=value });
+                        }
+                        if(category.Id==(long)BuiltInCategory.OST_PipeCurves) {
+                            try {var path=DuctGeometryReader.Read(element,row.DuctSource);var delta=sourceTransform.OfPoint(path.End)-sourceTransform.OfPoint(path.Start);PipeSlope.Set(row,delta.X,delta.Y,delta.Z);}
+                            catch(Exception ex) when(!(ex is OutOfMemoryException)){row.SlopeIssue=ex.Message;}
                         }
                         rows.Add(row);
                     }

@@ -1,4 +1,73 @@
+﻿## 2026-11-25 — Filled service values and Pipe slope
+
+- Replace the per-group Follow IFC/Manual value policy menu with actual filled Service Type choices plus Enter new… and explicit Keep native default. Keep Auto resolved selectors separate and restore Manual choices without changing them.
+- Collect host Cable Tray service strings and combine with IFC source values. No Revit SystemType is created for free-text service data.
+- Add Pipe-only Slope (%) to Elements and copied/exported table text; compute rise/horizontal run in host coordinates, show Vertical/Unavailable where appropriate.
+- Build 0 warnings/errors; 91 offscreen checks PASS. Read-only MCP checked all 10 sample linked Pipes. See LEVEL_CABLE_VERIFICATION.md and verification/service-slope previews.
+
+## 2026-11-25 — Consistent source group fields
+
+- Move Level into each Duct/Pipe/CableTray/Conduit card, using the same icon/title/hint/dropdown design as System and Type. Keep the resolved selector visible in Auto and editable in Manual.
+- Synchronize duplicated Duct source-level choices across cards; preserve Manual selections and request mappings.
+- Style Cable Tray Service Type and service text entry consistently with the other fields; preserve Follow IFC/manual/shared policy.
+- Release build 0 warnings/errors, 72 headless checks PASS and eight offscreen preview PNGs. No live model modifications.
+
+## 2026-11-25 — Curve levels and cable tray source geometry
+
+- Per-source Follow IFC level resolution for Pipe/Cable Tray/Conduit in Auto and Manual; retain manual mappings across mode switches, show resolved levels in review, block unresolved mappings, preserve transformed endpoints.
+- Read source IFC storey containment and actual type names. Match curve family/type without assuming an instance numeric suffix is a type name.
+- Explicit Follow IFC service selection in Cable Tray Manual mode.
+- Resolve the sample heightwise cable tray extrusion from unique declared Length and vertical section axis; preserve generic ambiguous/vertical extrusion checks.
+- Block round Conduits imported into the Cable Tray category before native creation. Do not change source categories or modify the linked model.
+- Headless curve UI and IFC regression tests; read-only live Revit 2023 geometry inspection. See LEVEL_CABLE_VERIFICATION.md.
+
 # Changelog
+
+## 24 November 2026 - Main final-review tab for every line category and explicit service following
+
+- Promote Review & Create to the fifth main workflow tab after Preview & Create for Ducts, Pipes, Cable Trays and Conduits. Embedded curve editors expose no nested tab headers. Settings navigation preserves existing controls and selections; final review refreshes source/target information and mapping counts before submission.
+- Add Duct final-review data and move its Create/Update button from embedded settings into the main final tab. Preserve existing group, fitting-gap, level and parameter validation and show errors in the final-review panel. Review navigation itself performs no creation.
+- Add an explicit Follow IFC / Use shared service selector for Cable Tray Auto mode. Display resolved Follow IFC / shared service text on the right instead of an empty read-only textbox. Keep independent Manual values and restore them after switching modes. No source service leaves the native default unchanged.
+- Revit 2023 Release/preview builds pass without warnings/errors; 371 WPF regression checks pass outside Revit, including the fifth main-tab route for all curve categories, Duct final review without creation, service-follow displays and existing navigation/transfer checks. Final review and service screens were rendered and inspected. Live model acceptance remains pending.
+
+## 24 November 2026 - Explicit Follow IFC state and final curve confirmation
+
+- Pipe/CT/Conduit Auto group type/system fields now display Follow IFC and the resolved result, or a specific unresolved-match message. Explicit shared project choices are labeled separately. Follow IFC resolves an unambiguous exact type label/type-name match or piping system name; an unrelated sole project type/system is no longer silently used in Auto.
+- Split the embedded curve creation screen into Settings and a final Review & Create tab. Move the source information table to final review and include current target type, system/service, target level, error policy and parameter mapping count. Refresh this snapshot when returning to review. Back from review returns to Settings.
+- Create is shown only on final review and is disabled for unresolved selections. Direct submission from Settings is blocked; the parent workflow still revalidates parameter mappings before execution. No element creation is invoked by entering the review tab.
+- Revit 2023 Release/preview builds pass with zero warnings/errors; 365 offscreen WPF checks pass, including explicit Follow IFC labels, unresolved-match blocking, final-only source tables and creation confirmation. Settings/review screens were rendered and visually inspected. Live model transactions remain pending.
+
+## 24 November 2026 - Duct-style curve layout and Cable Tray service
+
+- Reshape Pipe/Cable Tray/Conduit preview with a narrow left sidebar for Manual/Auto setup, shared type and system/service choices, level and error policy; source groups and preview remain on the right. Manual edits individual groups; Auto applies shared existing types or exact source-name matches and restores manual choices when switched back. This does not add automatic creation of missing Pipe/CT types or piping system types.
+- Carry per-source target type IDs and piping system IDs into native creation, with category/system validation and shared Type-value conflict checks grouped by actual selected target type.
+- Cable Tray uses Service Type text fields instead of a System Type selector. Read the linked tray's native service value, with an explicit IFC Service/Service Type property fallback; do not infer service from system type. Carry service values separately and set/check RBS_CTC_SERVICE_TYPE during creation. A blank service leaves the native default unchanged. CT's element table displays Service Type.
+- Move Duct manual source-level mappings into the left sidebar while retaining mutually exclusive Manual/Auto level controls and elevation preservation.
+- Revit 2023 Release/preview builds: zero warnings/errors. 355 WPF checks pass outside Revit, including per-source type/system/service requests, mode restoration, service-source precedence and Duct level placement. Pipe/CT screens were rendered and visually inspected. Native service writes and grouped placement still require live Revit acceptance.
+
+## 24 November 2026 - Existing line parameter transfer and embedded curve preview
+
+- Add parameter Update/Transfer for tracked Pipe, Cable Tray and Conduit targets. Resolve targets using the native-placement source-key schema already saved by earlier releases; enforce one target per source and matching categories. One transaction prepares bindings, validates conflicting shared Type values and applies mapped values; failures roll back. Missing source values are left unchanged. Geometry and system assignments are preserved.
+- Extend read-only current/proposed parameter previews to all four line categories. Keep the existing duct revision-baseline handling on the duct transfer path. Dashboard Update uses parameter-only updates for non-duct lines; duct geometry updates retain the existing planner.
+- Embed Pipe/CT/Conduit creation controls in the main Preview & Create tab instead of opening a modal window. Retain selections on tab/back navigation, validate current mappings on submit and preserve the existing native placement/rollback execution. Cable Tray and Conduit still require no native System Type.
+- Move the ordinary Source Refresh button to the source header's top right.
+- Revit 2023 Release/preview builds pass with zero warnings/errors. 337 offscreen WPF checks pass, covering embedded tab/back navigation and retained controls, six existing-line Update/Transfer routes without geometry preparation, and refresh button position. Live Revit parameter writes, tracking resolution, rollback and layout acceptance remain pending.
+
+## 24 November 2026 - Parameter mapping for all native MEP line categories
+
+- Enable Parameters for Ducts, Pipes, Cable Trays and Conduits. Preserve per-category drafts and carry validated mapping snapshots into native curve requests. Apply values inside each element creation transaction; parameter definitions are prepared inside the existing placement transaction group. Family parameter placement remains outside this scope.
+- Parameter creation and validation use the selected source category rather than Ducts. Single/bulk/CSV creation can extend a compatible existing definition to another line category while retaining the previous category set; incompatible data type or Instance/Type binding is rejected. Conflicting source values for a shared target Type parameter stop the native run before writes.
+- Rename the final creation step and creation screen headings to Preview & Create. Pipe keeps piping system mapping. Cable Tray and Conduit have no native System Type selector, requirement or preview column; IFC system data remains available as source metadata/parameter data.
+- Existing-element Update/Transfer and tracked current-value comparison remain duct-only. Other line parameter previews show proposed source values for creation.
+- Revit 2023 Release and preview builds: zero warnings/errors. 312 WPF checks pass outside Revit, including three complete line Parameters-to-request paths, mapping snapshots, common preview labels and CT/Conduit requests without System Type. Real project binding changes, parameter writes, Type effects and rollback still require live Revit acceptance.
+
+## 24 November 2026 - Level controls, Source refresh and parameter workflow fixes
+
+- Show one level-editing mode at a time: Auto displays the shared Follow IFC / target level field; Manual displays the per-source level mappings. Retain manual choices across mode switches and preserve IFC centerline elevations.
+- Add Source > Refresh all to reload the link list, selected link/category data and host type/parameter catalogs. Clear stale requests and preview/reader state; retain checked categories and per-category review drafts for the same link. Category comparison data is reread when continuing.
+- Pipe and other non-duct creation now go directly from Elements to their existing placement settings. Explicitly opening Parameters for these categories shows the duct-only scope explanation instead of a disabled duct mapping table. Returning to Ducts restores its own enabled parameter panel and drafts. Proposed target-name caches are reset when restoring another category.
+- Remove fully blank placeholder rows after successful single/bulk/CSV parameter creation; retain partially configured mapping drafts.
+- Revit 2023 Release builds complete with zero warnings/errors. 294 WPF regression checks pass outside Revit, including refresh/session retention, Duct/Pipe switching, placeholder cleanup and exclusive level visibility. These checks do not execute live model transactions.
 
 ## 22 November 2026 - Dashboard entry for the existing workflow
 

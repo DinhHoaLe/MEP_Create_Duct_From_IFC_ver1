@@ -1,10 +1,13 @@
-namespace IFCInfo
+﻿namespace IFCInfo
 {
     /// <summary>IFC data keyed by GUID: systems, elevation and duct dimensions.</summary>
     public sealed class IfcTerminalSource
     {
         public string Guid { get; set; }
         public string Name { get; set; }
+        public string LevelName {get;set;}
+        public string EntityType {get;set;}
+        public string TypeName {get;set;}
         public string SystemName { get; set; }
         public string SystemType { get; set; }
         public double? ElevationMm { get; set; }
@@ -22,6 +25,9 @@ namespace IFCInfo
         public string Scope { get; set; }
         public string SetName { get; set; }
         public string Name { get; set; }
+        public string LevelName {get;set;}
+        public string EntityType {get;set;}
+        public string TypeName {get;set;}
         public string Value { get; set; }
         public string Unit { get; set; }
         // Only populated for IFC length-typed values; normalized using explicit or project units.

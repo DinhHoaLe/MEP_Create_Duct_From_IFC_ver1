@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
@@ -68,7 +68,8 @@ namespace IFCInfo
                     Label="No placeable type",Kind="Unsupported",Placement="This category contains elements but has no type available for placement." });
             window.ReplacementTypes=types.OrderBy(t=>t.CategoryName).ThenBy(t=>t.Label).ToList();
             window.ReplacementLevels=new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().OrderBy(l=>l.ProjectElevation)
-                .Select(l=>new ReplacementLevelOption { Id=l.Id.Number(),Label=l.Name }).ToList();
+                .Select(l=>new ReplacementLevelOption { Id=l.Id.Number(),Label=l.Name,ElevationMm=l.ProjectElevation*304.8 }).ToList();
+            window.ReplacementServices=new FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_CableTray).WhereElementIsNotElementType().Select(e=>e.get_Parameter(BuiltInParameter.RBS_CTC_SERVICE_TYPE)?.AsString()).Where(v=>!string.IsNullOrWhiteSpace(v)).Select(v=>v.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(v=>v,StringComparer.OrdinalIgnoreCase).ToList();
             window.ReplacementSystems=new FilteredElementCollector(doc).OfClass(typeof(MEPSystemType)).Cast<MEPSystemType>()
                 .Where(t=>t is MechanicalSystemType || t is PipingSystemType)
                 .Select(t=>new ReplacementTypeOption { Id=t.Id.Number(),Label=t.Name,Kind=t is PipingSystemType ? "Pipe" : "Duct" }).ToList();

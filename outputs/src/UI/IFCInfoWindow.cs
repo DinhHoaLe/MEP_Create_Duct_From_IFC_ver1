@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.ComponentModel;
@@ -16,14 +16,16 @@ namespace IFCInfo
     {
         internal DashboardSelection DashboardChoice {get;set;}
         internal bool DashboardRequested {get;private set;}
+        internal bool CanMapLineParameters=>SelectedCategory==null || SupportedCategories.IsLine(SelectedCategory.Id);
         private FrameworkElement WorkflowSteps(int active,bool[] ready=null)
         {
-            string[] labels=DashboardChoice==null?null:DashboardChoice.IsReview?new[]{"Source","Elements"}:
-                DashboardChoice.IsTransfer?new[]{"Source","Elements","Parameters"}:
-                new[]{"Source","Elements","Parameters",DashboardChoice.IsUpdate?"Update\nDucts":DashboardChoice.Kind=="Family"?"Placement":"Create"};
+            string[] labels=DashboardChoice==null?new[]{"Source","Elements","Parameters","Preview\n& Create","Review\n& Create"}:DashboardChoice.IsReview?new[]{"Source","Elements"}:
+                DashboardChoice.IsTransfer || DashboardChoice.IsUpdate && SelectedCategory!=null && !CanCreateDucts?new[]{"Source","Elements","Parameters"}:
+                new[]{"Source","Elements","Parameters",DashboardChoice.IsUpdate?"Preview\n& Update":DashboardChoice.Kind=="Family"?"Placement":"Preview\n& Create","Review\n& Create"};
             return UiDesign.Steps(active,true,ready,labels);
         }
         public Action RunDuctCreation {get;set;}
+        public Func<List<LinkOption>> RefreshLinks {get;set;}
         private bool creationBusy;
         private void SubmitDuctRequest(DuctRequest request)
         {
@@ -38,12 +40,13 @@ namespace IFCInfo
             finally {
                 DuctCreationRequest=null;creationBusy=false;
                 settingsTab.Content=null;settingsSelection=null;
+                finalReviewTab.Content=null;
                 embeddedSettings?.Close();embeddedSettings=null;
                 workflowTabs.SelectedItem=elementsTab;
             }
         }
         private TabControl workflowTabs;
-        private TabItem sourceTab, elementsTab, settingsTab, parametersTab;
+        private TabItem sourceTab, elementsTab, settingsTab, parametersTab, finalReviewTab;
         private ParameterMappingPanel parameterPanel;
         public Func<List<ParameterOption>> ProjectParameters {get;set;}
         public Func<List<ParameterOption>> ParameterTypes {get;set;} public Func<List<ParameterOption>> ParameterGroups {get;set;}
@@ -55,6 +58,8 @@ namespace IFCInfo
         private List<AirTerminalRow> parameterSelection=new List<AirTerminalRow>();
         private string settingsSelection;
         private DuctCreationWindow embeddedSettings;
+        private CurveCreationWindow embeddedCurve;
+        private FrameworkElement curveContent;
         public CategoryReviewSession InitialReview {get;set;}
         public List<CategoryOption> ReviewCategories {get;private set;}=new List<CategoryOption>();
         private readonly Dictionary<long,List<string>> reviewChecks=new Dictionary<long,List<string>>();
@@ -88,7 +93,12 @@ namespace IFCInfo
             }
             parameterSelection.Clear();
             parameterPanel.RestoreRows(reviewMappings.TryGetValue(category.Id,out var maps)?maps:new List<IfcParameterMapping>());
+            settingsTab.Visibility=DashboardChoice?.IsTransfer==true || DashboardChoice?.IsUpdate==true && !CanCreateDucts?Visibility.Collapsed:Visibility.Visible;
+            settingsTab.Header=DashboardChoice?.IsUpdate==true?"Preview & Update":"Preview & Create";
             settingsTab.Content=null;settingsSelection=null;embeddedSettings?.Close();embeddedSettings=null;
+            embeddedCurve?.Close();embeddedCurve=null;
+            curveContent=null;finalReviewTab.Content=null;
+            finalReviewTab.Visibility=CanMapLineParameters && settingsTab.Visibility==Visibility.Visible && DashboardChoice?.IsReview!=true?Visibility.Visible:Visibility.Collapsed;
             elementsTab.Content=new ScrollViewer{Content=CountPage(),VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
             refreshReviewHeader?.Invoke();workflowTabs.SelectedItem=elementsTab;
         }
@@ -118,6 +128,9 @@ namespace IFCInfo
             settingsSelection=SelectionKey();
             editor.BackEmbedded=()=>workflowTabs.SelectedItem=parametersTab; editor.CloseEmbedded=()=>Close();
             editor.SubmitEmbedded=request=> {completed(request);SubmitDuctRequest(request);};
+            editor.RequestReview=()=>workflowTabs.SelectedItem=finalReviewTab;
+            editor.RequestSettings=()=>workflowTabs.SelectedItem=settingsTab;
+            editor.MappingSummary=()=>parameterPanel.CaptureRows().Count(m=>m.Selected && !string.IsNullOrWhiteSpace(m.Source) && !string.IsNullOrWhiteSpace(m.Target))+" parameter mapping(s).";
             settingsTab.Content=editor.DetachBody();
             workflowTabs.SelectedItem=settingsTab;
         }
@@ -195,6 +208,7 @@ namespace IFCInfo
         public List<AirTerminalRow> AirTerminals { get; set; } = new List<AirTerminalRow>();
         public List<ReplacementTypeOption> ReplacementTypes { get; set; } = new List<ReplacementTypeOption>();
         public Func<string,long,List<ReplacementTypeOption>> LoadPlacementFamily { get; set; }
+        public List<string> ReplacementServices {get;set;}=new List<string>();
         public List<ReplacementTypeOption> ReplacementSystems { get; set; } = new List<ReplacementTypeOption>();
         public List<ReplacementLevelOption> ReplacementLevels { get; set; } = new List<ReplacementLevelOption>();
         public ReplacementRequest Replacement
@@ -241,6 +255,7 @@ namespace IFCInfo
             StateChanged += OnWindowStateChanged;
             Closed += OnWindowClosed;
             Closed += (s,e)=>embeddedSettings?.Close();
+            Closed += (s,e)=>embeddedCurve?.Close();
             var root = new DockPanel { Background = Background };
             UiDesign.SetContent(this, root);
             var header = new Grid { Margin = new Thickness(28, 20, 28, 12) };
@@ -322,7 +337,10 @@ namespace IFCInfo
             };
             var sourceTitle = Text("Source categories", 22, "#37322B");
             sourceTitle.FontWeight = FontWeights.SemiBold;
-            sourceFields.Children.Add(sourceTitle);
+            var sourceHeader=new DockPanel{LastChildFill=true};sourceFields.Children.Add(sourceHeader);
+            var refreshSource=Button("Refresh",false);refreshSource.Name="RefreshAllSources";refreshSource.HorizontalAlignment=HorizontalAlignment.Right;
+            refreshSource.ToolTip="Reload IFC links, source categories, model comparisons and project catalogs. Retain review drafts for the same link.";
+            DockPanel.SetDock(refreshSource,Dock.Right);sourceHeader.Children.Add(refreshSource);sourceHeader.Children.Add(sourceTitle);
             var description = Text("Choose a link and check one or more Line / Family categories. Review elements by category in the next step.", 15, "#716B63");
             description.Margin = new Thickness(0, 8, 0, 0);
             sourceFields.Children.Add(description);
@@ -339,48 +357,70 @@ namespace IFCInfo
                 footer.Margin=compact?new Thickness(20,6,20,10):new Thickness(38,20,38,26);
                 card.Margin=compact?new Thickness(16,8,16,10):new Thickness(22,16,22,20);
                 sourceBrowser.SetCompact(compact);
+                if(workflowTabs!=null)foreach(TabItem tab in workflowTabs.Items)tab.Padding=root.ActualWidth<900?new Thickness(10,8,10,8):new Thickness(20,10,20,10);
             };
             workflowTabs=new TabControl {Name="WorkflowTabs",Background=Background,BorderThickness=new Thickness(0),Margin=new Thickness(20,4,20,0)};
             sourceTab=new TabItem {Header="Source",Content=sourceSurface,Padding=new Thickness(20,10,20,10)};
             elementsTab=new TabItem {Header="Elements",IsEnabled=true,Padding=new Thickness(20,10,20,10)};
-            settingsTab=new TabItem {Header="Create Ducts",IsEnabled=true,Padding=new Thickness(20,10,20,10)};
+            settingsTab=new TabItem {Header="Preview & Create",IsEnabled=true,Padding=new Thickness(20,10,20,10)};
             UiDesign.StyleWorkflowTabs(workflowTabs);
             workflowTabs.Items.Add(sourceTab);workflowTabs.Items.Add(elementsTab);
             parameterPanel=new ParameterMappingPanel {Sources=()=>{if(DashboardChoice?.IsUpdate==true || DashboardChoice?.IsTransfer==true)return parameterSelection.Where(r=>AirTerminals.Contains(r)).ToList();var checkedRows=AirTerminals.Where(r=>r.IsSelected && r.CanSelect).ToList();return checkedRows.Count>0?checkedRows:parameterSelection.Where(r=>AirTerminals.Contains(r)).ToList();},
                 SelectedSources=()=>parameterSelection.Where(r=>AirTerminals.Contains(r)).ToList(),
+                CategoryLabel=()=>SelectedCategory?.Name??"Line elements",
                 Targets=()=>LoadParameterTargets?.Invoke()??new List<string>(), Types=()=>ParameterTypes?.Invoke()??new List<ParameterOption>(), Groups=()=>ParameterGroups?.Invoke()??new List<ParameterOption>(), Catalog=()=>ProjectParameters?.Invoke()??new List<ParameterOption>(),
                 CreateParameter=(name,type,group,binding)=> {if(CreateParameter==null)throw new InvalidOperationException("Select an IFC source and Ducts category first.");CreateParameter(name,type,group,binding);},
                 Transfer=(rows,maps)=>TransferParameters?.Invoke(rows,maps)??"Transfer unavailable for this category.",
                 Preview=(rows,maps)=>PreviewParameters?.Invoke(rows,maps)??new List<ParameterValuePreview>(),
                 CheckTarget=name=>CheckParameterTarget?.Invoke(name)??"Catalog unavailable"};
             parametersTab=new TabItem {Header="Parameters",Content=parameterPanel};
-            workflowTabs.Items.Add(parametersTab);workflowTabs.Items.Add(settingsTab);
+            finalReviewTab=new TabItem{Header="Review & Create",Name="FinalReviewTab"};
+            workflowTabs.Items.Add(parametersTab);workflowTabs.Items.Add(settingsTab);workflowTabs.Items.Add(finalReviewTab);
             root.Children.Add(workflowTabs);
             workflowTabs.SelectionChanged+=(s,e)=>
             {
                 if(e.Source!=workflowTabs)return;
                 bool parameters=workflowTabs.SelectedItem==parametersTab;
-                if(parameters){parameterPanel.Refresh();parameterPanel.IsEnabled=CanCreateDucts || SelectedCategory==null;}
+                if(parameters){parameterPanel.Refresh();parameterPanel.IsEnabled=CanMapLineParameters;
+                    parametersTab.Content=CanMapLineParameters?(object)parameterPanel:new TextBlock{Text="Parameter mapping supports Ducts, Pipes, Cable Trays and Conduits. Continue to Placement for this family category.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(24),FontSize=16};}
                 bool source=workflowTabs.SelectedItem==sourceTab;
                 bool settings=workflowTabs.SelectedItem==settingsTab;
-                footer.Visibility=settings?Visibility.Collapsed:Visibility.Visible;
+                bool final=workflowTabs.SelectedItem==finalReviewTab;
+                footer.Visibility=settings||final?Visibility.Collapsed:Visibility.Visible;
                 next.Visibility=source?Visibility.Visible:Visibility.Collapsed;
                 back.Visibility=source||settings?Visibility.Collapsed:Visibility.Visible;
-                create.Visibility=!source&&!settings?Visibility.Visible:Visibility.Collapsed;
-                create.Content=parameters?(CanCreateDucts?"Next: Create Ducts →":"Next: Placement →"):"Next: Parameters →";
+                create.Visibility=!source&&!settings&&!final?Visibility.Visible:Visibility.Collapsed;
+                create.Content=parameters?(CanMapLineParameters?"Next: Preview & Create →":"Next: Placement →"):!CanMapLineParameters?"Next: Placement →":"Next: Parameters →";
                 if(DashboardChoice?.IsUpdate==true && parameters)create.Content="Next: Update Ducts →";
-                if(DashboardChoice?.IsTransfer==true && parameters)create.Content="Transfer values";
+                if((DashboardChoice?.IsTransfer==true || DashboardChoice?.IsUpdate==true && !CanCreateDucts) && parameters)create.Content="Update parameter values";
                 if(DashboardChoice?.IsReview==true)create.Visibility=Visibility.Collapsed;
-                heading.Text=parameters?"Parameters":source?"Select link and category":settings?"Create Ducts":SelectedCategory?.Name??"Elements";
+                heading.Text=parameters?"Parameters":source?"Select link and category":settings?"Preview & Create":SelectedCategory?.Name??"Elements";
                 if(settings && DashboardChoice?.IsUpdate==true)heading.Text="Update Ducts";
-                subtitle.Text=parameters?(CanCreateDucts || SelectedCategory==null?"Optional: choose properties for the checked IFC elements, or continue without parameters":"Parameter mapping applies to ducts. Continue to configure placement for "+SelectedCategory.Name+"."):source?"Select an IFC source":settings?"Configure selected ducts":"Review IFC elements";
+                if(final){heading.Text="Review & Create";subtitle.Text="Confirm all settings before creating";}
+                subtitle.Text=parameters?(CanMapLineParameters?"Optional: map IFC properties for the selected line elements, or continue without parameters":"Continue to configure placement for "+SelectedCategory.Name+"."):source?"Select an IFC source":settings?"Review selected elements and creation settings":"Review IFC elements";
                 if(parameters && (DashboardChoice?.IsTransfer==true || DashboardChoice?.IsUpdate==true))
-                    subtitle.Text=DashboardChoice.IsTransfer?"Map IFC properties for highlighted source rows, then click Transfer values.":"Optional: configure parameters for the highlighted ducts before reviewing updates.";
-                progress.Content=WorkflowSteps(source?1:settings?4:parameters?3:2,new[]{SelectedCategory!=null && AirTerminals.Count>0,DashboardChoice?.IsUpdate==true || DashboardChoice?.IsTransfer==true?parameterSelection.Any(r=>AirTerminals.Contains(r)):AirTerminals.Any(r=>r.IsSelected && r.CanSelect),SelectedCategory!=null && parameterPanel.Ready,false});
+                    subtitle.Text=DashboardChoice.IsTransfer || !CanCreateDucts?"Map IFC properties for highlighted source rows, then click Update parameter values. Geometry is preserved.":"Optional: configure parameters for the highlighted ducts before reviewing updates.";
+                progress.Content=WorkflowSteps(final?5:source?1:settings?4:parameters?3:2,new[]{SelectedCategory!=null && AirTerminals.Count>0,DashboardChoice?.IsUpdate==true || DashboardChoice?.IsTransfer==true?parameterSelection.Any(r=>AirTerminals.Contains(r)):AirTerminals.Any(r=>r.IsSelected && r.CanSelect),SelectedCategory!=null && parameterPanel.Ready,false});
+                if(final)
+                {
+                    subtitle.Text="Confirm source, target and all creation options";
+                    if(settingsSelection!=SelectionKey() || embeddedCurve==null && embeddedSettings==null){workflowTabs.SelectedItem=settingsTab;feedback.Text="Finish preview settings before reviewing.";return;}
+                    if(embeddedCurve!=null){settingsTab.Content=null;finalReviewTab.Content=null;finalReviewTab.Content=curveContent;embeddedCurve.SelectConfirmation(true);}
+                    else finalReviewTab.Content=embeddedSettings.PrepareReview();
+                    return;
+                }
+                if(settings && embeddedSettings!=null)embeddedSettings.LeaveReview();
+                if(settings && embeddedCurve!=null && curveContent!=null && settingsSelection==SelectionKey()){finalReviewTab.Content=null;settingsTab.Content=curveContent;embeddedCurve.SelectConfirmation(false);}
                 if(workflowTabs.SelectedItem==elementsTab && elementsTab.Content==null) elementsTab.Content=new ScrollViewer {Content=CountPage(),VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
-                if(settings && (settingsTab.Content==null || settingsSelection!=SelectionKey() || embeddedSettings==null))
+                if(settings && embeddedCurve!=null)embeddedCurve.RefreshConfirmation?.Invoke();
+                if(settings && (settingsTab.Content==null || settingsSelection!=SelectionKey() || embeddedSettings==null && embeddedCurve==null))
                 {
                     settingsTab.Content=null;
+                    if(SelectedCategory!=null && !CanCreateDucts)
+                    {
+                        workflowTabs.SelectedItem=CanMapLineParameters?parametersTab:elementsTab;
+                        create.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));return;
+                    }
                     if(DashboardChoice?.IsUpdate==true && !parameterSelection.Any(r=>AirTerminals.Contains(r)))
                     {
                         feedback.Text="Highlight source rows in Elements before reviewing updates.";
@@ -401,7 +441,8 @@ namespace IFCInfo
                     description.Text="Choose a link and check "+(DashboardChoice.Kind=="Family"?"Family Instance":"Line")+" categories for "+DashboardChoice.Task+".";
                     if(DashboardChoice.IsUpdate)settingsTab.Header="Update Ducts";
                     if(DashboardChoice.IsTransfer)settingsTab.Visibility=Visibility.Collapsed;
-                    if(DashboardChoice.IsReview){parametersTab.IsEnabled=false;settingsTab.IsEnabled=false;}
+                    if(DashboardChoice.IsReview){parametersTab.IsEnabled=false;settingsTab.IsEnabled=false;finalReviewTab.Visibility=Visibility.Collapsed;}
+                    if(DashboardChoice.IsTransfer)finalReviewTab.Visibility=Visibility.Collapsed;
                 }
                 linkBox.ItemsSource = Links;
                 feedback.Text = Links.Count == 0 ? "No IFC link was found. Link an IFC model, then reopen the tool." : "Select an IFC link to browse elements.";
@@ -438,10 +479,14 @@ namespace IFCInfo
                 LoadCategory = null;
                 LoadPreview = null;
                 PrepareDucts = null;
+                PrepareUpdates = null;
                 parameterSelection.Clear();
+                parameterPanel.RestoreRows(new List<IfcParameterMapping>());
                 TransferParameters=null; PreviewParameters=null;LoadParameterTargets=null; CheckParameterTarget=null;CreateParameter=null;
                 CanCreateDucts = false;
                 CanReplaceCategory = false;
+                embeddedCurve?.Close();embeddedCurve=null;
+                curveContent=null;finalReviewTab.Content=null;
                 if (SelectedLink == null)
                     return;
                 if (!SelectedLink.IsLoaded)
@@ -456,6 +501,32 @@ namespace IFCInfo
                     feedback.Text = Categories.Count == 0 ? "The link has no categories containing supported elements." : "Check categories, then click Continue to review their elements.";
                 }
                 catch (Exception ex) { feedback.Text = "Could not read link: " + ex.Message; }
+            };
+            refreshSource.Click+=(s,e)=>
+            {
+                if(creationBusy)return;
+                var previous=SelectedLink;
+                var review=ExportReviewSession();
+                refreshSource.IsEnabled=false;
+                try
+                {
+                    using(LoadingWindow.ShowWhile(this,"Refreshing sources","Reloading links, categories and project catalogs…"))
+                    {
+                        var refreshed=RefreshLinks?.Invoke()??Links;
+                        linkBox.SelectedItem=null;
+                        Links=refreshed??new List<LinkOption>();linkBox.ItemsSource=Links;
+                        linkBox.SelectedItem=Links.FirstOrDefault(l=>l.Id==previous?.Id);
+                        if(SelectedLink!=null)
+                        {
+                            foreach(var category in Categories)category.IsChecked=review.CategoryIds.Contains(category.Id);
+                            foreach(var pair in review.CheckedElements)reviewChecks[pair.Key]=pair.Value.ToList();
+                            foreach(var pair in review.Mappings)reviewMappings[pair.Key]=ParameterMappingPanel.CopyRows(pair.Value);
+                        }
+                    }
+                    feedback.Text=SelectedLink==null?"Source list refreshed. Select an IFC link.":"Sources and project catalogs refreshed. Continue to reload selected categories and comparisons.";
+                }
+                catch(Exception ex){feedback.Text="Refresh failed: "+ex.Message;}
+                finally{refreshSource.IsEnabled=true;}
             };
             sourceBrowser.SelectionChanged += () => {
                 next.IsEnabled = sourceBrowser.Selected.Count>0;
@@ -479,7 +550,7 @@ namespace IFCInfo
                 next.Visibility = Visibility.Collapsed;
                 back.Visibility = Visibility.Visible;
                 zoomSource.Visibility=Visibility.Visible;
-                create.Content = "Next: Parameters →";
+                create.Content = CanMapLineParameters?"Next: Parameters →":"Next: Placement →";
                 create.Visibility = CanCreateDucts || CanReplaceCategory ? Visibility.Visible : Visibility.Collapsed;
                 if(DashboardChoice?.IsReview==true)create.Visibility=Visibility.Collapsed;
                 if(DashboardChoice?.IsUpdate==true || DashboardChoice?.IsTransfer==true)
@@ -487,7 +558,7 @@ namespace IFCInfo
                 else
                 feedback.Text = "";
             };
-            refreshReviewHeader=()=> {heading.Text=SelectedCategory?.Name??"Elements";subtitle.Text="Step 2 · Review elements by category";create.Content="Next: Parameters →";create.Visibility=DashboardChoice?.IsReview==true?Visibility.Collapsed:CanCreateDucts || CanReplaceCategory?Visibility.Visible:Visibility.Collapsed;};
+            refreshReviewHeader=()=> {heading.Text=SelectedCategory?.Name??"Elements";subtitle.Text="Step 2 · Review elements by category";create.Content=CanMapLineParameters?"Next: Parameters →":"Next: Placement →";create.Visibility=DashboardChoice?.IsReview==true?Visibility.Collapsed:CanCreateDucts || CanReplaceCategory?Visibility.Visible:Visibility.Collapsed;};
             back.Click += (s,e)=> {
                 workflowTabs.SelectedItem=workflowTabs.SelectedItem==parametersTab?elementsTab:sourceTab;
             };
@@ -501,9 +572,23 @@ namespace IFCInfo
                 }
                 if (SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves || SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_CableTray || SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_Conduit)
                 {
+                    var mapped=new DuctRequest{Items=selected.Select(r=>new DuctPlanItem{Source=r}).ToList()};
+                    if(!parameterPanel.Validate(mapped)){workflowTabs.SelectedItem=parametersTab;return;}
                     string kind=SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves?"Pipe":SelectedCategory.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_Conduit?"Conduit":"CableTray";
-                    var curveDialog=new CurveCreationWindow(selected,ReplacementTypes,ReplacementLevels,ReplacementSystems,SelectedCategory.Id,kind) { Owner=this };
-                    if(curveDialog.ShowDialog()==true) { Replacement=curveDialog.Request; Close(); }
+                    if(embeddedCurve!=null && curveContent!=null && settingsSelection==SelectionKey()){workflowTabs.SelectedItem=settingsTab;return;}
+                    embeddedCurve?.Close();
+                    var curveDialog=new CurveCreationWindow(selected,ReplacementTypes,ReplacementLevels,ReplacementSystems,SelectedCategory.Id,kind,ReplacementServices);
+                    embeddedCurve=curveDialog;settingsSelection=SelectionKey();
+                    curveDialog.RequestReview=()=>workflowTabs.SelectedItem=finalReviewTab;
+                    curveDialog.RequestSettings=()=>workflowTabs.SelectedItem=settingsTab;
+                    curveDialog.MappingSummary=()=>parameterPanel.CaptureRows().Count(m=>m.Selected && !string.IsNullOrWhiteSpace(m.Source) && !string.IsNullOrWhiteSpace(m.Target))+" parameter mapping(s).";
+                    curveDialog.BackEmbedded=()=>workflowTabs.SelectedItem=parametersTab;
+                    curveDialog.SubmitEmbedded=request=> {
+                        var current=new DuctRequest{Items=selected.Select(r=>new DuctPlanItem{Source=r}).ToList()};
+                        if(!parameterPanel.Validate(current)){workflowTabs.SelectedItem=parametersTab;return;}
+                        Replacement=request;Replacement.ParameterMappings=ParameterMappingPanel.CopyRows(current.ParameterMappings);Close();
+                    };
+                    curveContent=curveDialog.DetachBody();settingsTab.Content=curveContent;workflowTabs.SelectedItem=settingsTab;
                     return;
                 }
                 var dialog = new NativePlacementWindow(selected, ReplacementTypes, ReplacementLevels,ReplacementSystems,SelectedCategory.Id,
@@ -522,7 +607,7 @@ namespace IFCInfo
                     var highlighted=parameterSelection.Where(r=>AirTerminals.Contains(r)).ToList();
                     if(highlighted.Count==0){feedback.Text="Highlight at least one source row in Elements (Ctrl / Shift).";return;}
                     if(workflowTabs.SelectedItem==elementsTab){workflowTabs.SelectedItem=parametersTab;return;}
-                    if(DashboardChoice.IsTransfer){parameterPanel.TransferSelectedExisting();return;}
+                    if(DashboardChoice.IsTransfer || !CanCreateDucts){parameterPanel.TransferSelectedExisting();return;}
                     if(!parameterPanel.ValidateNext())return;
                     try
                     {
@@ -533,7 +618,7 @@ namespace IFCInfo
                     catch(Exception ex){feedback.Text="Could not prepare updates: "+ex.Message;}
                     return;
                 }
-                if(workflowTabs.SelectedItem==elementsTab){if(!AirTerminals.Any(r=>r.IsSelected && r.CanSelect)){feedback.Text="Check at least one source element.";return;} workflowTabs.SelectedItem=parametersTab;return;}
+                if(workflowTabs.SelectedItem==elementsTab){if(!AirTerminals.Any(r=>r.IsSelected && r.CanSelect)){feedback.Text="Check at least one source element.";return;}if(!CanMapLineParameters){openPlacement();return;} workflowTabs.SelectedItem=parametersTab;return;}
                 if(SelectedCategory==null && !CanCreateDucts){workflowTabs.SelectedItem=settingsTab;return;}
                 if (!CanCreateDucts) { openPlacement(); return; }
                 if(workflowTabs.SelectedItem==parametersTab && !parameterPanel.ValidateNext()){feedback.Text="Missing or invalid Revit Parameter. Check Parameters.";return;}
@@ -666,7 +751,7 @@ namespace IFCInfo
                 new { Header = "Element ID", Property = "ElementId", Width = 95.0 },
                 new { Header = "Category", Property = "CategoryName", Width = 145.0 },
                 new { Header = "Element", Property = "Name", Width = 220.0 },
-                new { Header = "System Type", Property = "SystemType", Width = 150.0 },
+                new { Header = SelectedCategory?.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_CableTray?"Service Type":"System Type", Property = SelectedCategory?.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_CableTray?"ServiceType":"SystemType", Width = 150.0 },
                 new { Header = "System Name", Property = "SystemName", Width = 150.0 },
                 new { Header = "Shape", Property = "Shape", Width = 100.0 } })
             {
@@ -680,6 +765,8 @@ namespace IFCInfo
                     ElementStyle = cellText
                 });
             }
+            if(SelectedCategory?.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves)
+                table.Columns.Add(new DataGridTextColumn{Header="Slope (%)",SortMemberPath="SlopePercent",Binding=new System.Windows.Data.Binding("Slope"),IsReadOnly=true,Width=new DataGridLength(90),MinWidth=85,ElementStyle=cellText});
             focusedSource=null; zoomSource.IsEnabled=false;
             parameterSelection.Clear();
             IfcObjectViewer previewViewer=null;
@@ -919,7 +1006,8 @@ namespace IFCInfo
 
         public string SystemTableText()
         {
-            var result = new StringBuilder((CanCreateDucts ? "Duct comparison\t" : "") + "Element ID\tCategory\tElement\tSystem Type\tSystem Name\tElevation (mm)");
+            bool pipe=SelectedCategory?.Id==(long)Autodesk.Revit.DB.BuiltInCategory.OST_PipeCurves;
+            var result = new StringBuilder((CanCreateDucts ? "Duct comparison\t" : "") + "Element ID\tCategory\tElement\tSystem Type\tSystem Name\tElevation (mm)"+(pipe?"\tSlope (%)":""));
             foreach (var row in AirTerminals)
             {
                 result.AppendLine();
@@ -927,6 +1015,7 @@ namespace IFCInfo
                     result.Append(CleanCell(row.DuctExistence) + "\t");
                 result.Append(string.Join("\t", new[] { CleanCell(row.ElementId), CleanCell(row.CategoryName),CleanCell(row.Name),
                     CleanCell(row.SystemType), CleanCell(row.SystemName), CleanCell(row.Elevation) }));
+                if(pipe)result.Append("\t"+CleanCell(row.Slope));
             }
             return result.ToString();
         }

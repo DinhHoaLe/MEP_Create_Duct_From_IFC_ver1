@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Markup;
 using System.Windows.Media;
@@ -204,7 +204,7 @@ namespace IFCInfo
         internal static FrameworkElement Steps(int active, bool fourSteps=false, bool[] ready=null, string[] labelsOverride=null)
         {
             var labels = new[] { "Select link\nand category", "Select elements\nand type", "Create and finish" };
-            if(fourSteps)labels=new[]{"Source","Elements","Parameters","Create\nDucts"};
+            if(fourSteps)labels=new[]{"Source","Elements","Parameters","Preview\n& Create"};
             if(labelsOverride!=null && labelsOverride.Length>0)labels=labelsOverride;
             var grid = new Grid { Width = labelsOverride==null?(fourSteps?450:340):labels.Length*90+(labels.Length-1)*35, VerticalAlignment = VerticalAlignment.Center };
             for (int i = 0; i < labels.Length*2-1; i++)
@@ -259,12 +259,22 @@ namespace IFCInfo
             }
             return grid;
         }
-        internal static ComboBox Field(StackPanel body, string title, string description, string placeholder, bool category, bool compact=false)
+        internal static void StyleServiceEntry(TextBox box,bool compact=false)
+        {
+            box.MinHeight=compact?36:46;box.FontSize=compact?14:16;box.Padding=compact?new Thickness(10,6,10,6):new Thickness(15,10,15,10);
+            box.Margin=new Thickness(0,6,0,0);box.Foreground=IFCInfoWindow.Brush("#37322B");box.Background=IFCInfoWindow.Brush("#F5F2EE");
+            box.BorderBrush=IFCInfoWindow.Brush("#DDD6CE");box.BorderThickness=new Thickness(1.2);
+            box.Template=(ControlTemplate)XamlReader.Parse(@"<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='TextBox'><Border Background='{TemplateBinding Background}' BorderBrush='{TemplateBinding BorderBrush}' BorderThickness='{TemplateBinding BorderThickness}' CornerRadius='7' Padding='{TemplateBinding Padding}'><ScrollViewer x:Name='PART_ContentHost' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'/></Border></ControlTemplate>");
+        }
+        internal static ComboBox Field(StackPanel body, string title, string description, string placeholder, bool category, bool compact=false, bool levelIcon=false)
         {
             var grid = new Grid { Margin = new Thickness(0, 24, 0, 0) };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
             grid.ColumnDefinitions.Add(new ColumnDefinition());
-            grid.Children.Add(Icon(category));
+            var fieldIcon=Icon(category);
+            if(levelIcon && fieldIcon is Border levelTile && levelTile.Child is System.Windows.Shapes.Path levelPath)
+                levelPath.Data=Geometry.Parse("M1,4 L23,4 M1,12 L23,12 M1,20 L23,20 M4,1 L4,7 M11,9 L11,15 M18,17 L18,23");
+            grid.Children.Add(fieldIcon);
             var field = new StackPanel();
             Grid.SetColumn(field, 1);
             grid.Children.Add(field);

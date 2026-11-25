@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.ComponentModel;
 
 namespace IFCInfo
@@ -48,12 +48,21 @@ namespace IFCInfo
         public string Name { get; set; }
         public string SystemType { get; set; }
         public string SystemName { get; set; }
+        public string ServiceType {get;set;}
+        public string SourceLevelName {get;set;}
+        // Internal host coordinates, not IFC placement or shared-coordinate elevation.
+        public double? HostLevelElevationMm {get;set;}
+        public double? HostCenterElevationMm {get;set;}
         public string NativeShape { get; set; }
         public string Shape => !string.IsNullOrEmpty(NativeShape) ? NativeShape :
             DuctSource?.ProfileShape == "Oval" ? "Oval" : DuctSource?.DiameterMm > 0 ? "Round" :
             DuctSource?.WidthMm > 0 && DuctSource.HeightMm > 0 ?
                 (Math.Abs(DuctSource.WidthMm - DuctSource.HeightMm) <= 0.1 ? "Square" : "Rectangular") : "Unknown";
         public string IfcGuid { get; set; }
+        public double? SlopePercent {get;set;}
+        public bool IsVerticalPipe {get;set;}
+        public string SlopeIssue {get;set;}
+        public string Slope=>IsVerticalPipe?"Vertical":SlopePercent?.ToString("0.###",System.Globalization.CultureInfo.InvariantCulture)??"Unavailable";
         public string Elevation { get; set; }
         public string DataSource { get; set; }
     }

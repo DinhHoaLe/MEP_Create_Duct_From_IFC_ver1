@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -16,10 +16,21 @@ namespace IFCInfo
         public Func<string,long,long> CreateDuctType {get;set;}
         public Action<Window> BrowseSystems {get;set;}
         public Action BackEmbedded { get; set; } public Action CloseEmbedded { get; set; }
+        public Action RequestReview {get;set;}
+        public Action RequestSettings {get;set;}
+        public Func<FrameworkElement> PrepareReview {get;private set;}
+        public bool ReviewActive {get;set;}
+        private Button createButton;
+        private StackPanel creationButtons;
+        private TextBlock reviewFeedback;
+        private Panel settingsFooter;
+        public Func<string> MappingSummary {get;set;}
+        public void LeaveReview(){ReviewActive=false;if(reviewFeedback.Parent is Panel parent && parent!=settingsFooter){parent.Children.Remove(reviewFeedback);settingsFooter.Children.Insert(0,reviewFeedback);}}
         public FrameworkElement DetachBody()
         {
             ((Panel)embeddedBody.Parent).Children.Remove(embeddedBody);
             Content=null; embeddedHeader.Visibility=Visibility.Collapsed; embeddedBody.Margin=new Thickness(8);
+            if(RequestReview!=null){creationButtons.Children.Remove(createButton);var review=IFCInfoWindow.Button("Review all settings →",true);review.Name="ReviewDuctSettings";review.Click+=(s,e)=>RequestReview();creationButtons.Children.Insert(1,review);}
             return embeddedBody;
         }
         public DuctRequest Request
@@ -30,7 +41,7 @@ namespace IFCInfo
             List<DuctChoice> roundTypes, List<DuctChoice> rectangularTypes, List<DuctChoice> systems,
             List<DuctChoice> levels, List<DuctChoice> worksets, DuctSettingsData saved, bool updating = false, List<DuctChoice> ovalTypes = null)
         {
-            Title = updating ? "Preview duct updates from IFC" : "Step 3 · Create ducts from IFC";
+            Title = updating ? "Preview duct updates from IFC" : "Preview & Create — Ducts from IFC";
             Width = 1200;
             Height = 690;
             MinWidth = 900;
@@ -48,6 +59,7 @@ namespace IFCInfo
             DockPanel.SetDock(footer, Dock.Bottom);
             root.Children.Add(footer);
             var feedback = IFCInfoWindow.Text("", 13, "#9A5B12");
+            reviewFeedback=feedback;settingsFooter=footer;
             footer.Children.Add(feedback);
             root.AddHandler(System.Windows.Controls.Primitives.Selector.SelectionChangedEvent,new SelectionChangedEventHandler((s,e)=>feedback.Text=""));
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
@@ -56,6 +68,7 @@ namespace IFCInfo
             back.Click += (s, e) => { if(BackEmbedded!=null) BackEmbedded(); else Close(); };
             var systemReview = IFCInfoWindow.Button("System", false); buttons.Children.Add(systemReview);
             var create = IFCInfoWindow.Button((updating ? "Update " : "Create ") + items.Count + " Duct", true);
+            createButton=create;creationButtons=buttons;
             create.IsEnabled = items.Count > 0;
             buttons.Children.Add(create); buttons.Children.Add(back); var close=IFCInfoWindow.Button("Close",false); close.Click+=(s,e)=> {if(CloseEmbedded!=null)CloseEmbedded();else Close();}; buttons.Children.Add(close);
             footer.Children.Add(buttons);
@@ -63,10 +76,10 @@ namespace IFCInfo
             header.ColumnDefinitions.Add(new ColumnDefinition());
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var titlePanel = new StackPanel(); header.Children.Add(titlePanel);
-            var title = IFCInfoWindow.Text(updating ? "Update ducts from IFC" : "Duct creation settings", 27, "#37322B");
+            var title = IFCInfoWindow.Text(updating ? "Update ducts from IFC" : "Preview & Create — Ducts", 27, "#37322B");
             title.FontWeight = FontWeights.Bold; titlePanel.Children.Add(title);
-            titlePanel.Children.Add(IFCInfoWindow.Text("Step 3 · Review and create ducts", 14, "#716B63"));
-            var steps = new ContentControl { Content = UiDesign.Steps(3), Margin = new Thickness(12,0,0,0) };
+            titlePanel.Children.Add(IFCInfoWindow.Text("Step 4 · Review and create ducts", 14, "#716B63"));
+            var steps = new ContentControl { Content = UiDesign.Steps(4,true), Margin = new Thickness(12,0,0,0) };
             Grid.SetColumn(steps,1); header.Children.Add(steps);
             header.SizeChanged += (s,e) => steps.Visibility = header.ActualWidth < 780 ? Visibility.Collapsed : Visibility.Visible;
             DockPanel.SetDock(header,Dock.Top); root.Children.Add(header);
@@ -264,36 +277,57 @@ namespace IFCInfo
             var followLevel=new DuctChoice{Id=0,Name="Follow IFC — match name / elevation"};
             var commonLevel=UiDesign.Field(body,"Level","","Select level",false,true);commonLevel.Name="SharedLevel";
             commonLevel.ItemsSource=new[]{followLevel}.Concat(levels).ToList();commonLevel.SelectedItem=followLevel;
-            groupsBody.Children.Add(new Border{Height=1,Background=IFCInfoWindow.Brush("#DDD6CE"),Margin=new Thickness(0,16,0,12)});
-            groupsBody.Children.Add(IFCInfoWindow.Text("Level",16,"#37322B"));
-            foreach(var key in items.Select(i=>i.LevelKey??"No source level").Distinct()) {
-                var box=UiDesign.Field(groupsBody,"Source level: "+key,"","Select target level",false,true);box.Name="GroupLevel";
-                var choices=new[]{new DuctChoice{Id=0,Name="Automatic by elevation"}}.Concat(levels).ToList();
-                box.ItemsSource=choices;
-                long savedId=saved.Levels.FirstOrDefault(m=>m.Key==key)?.Id??0;
-                box.SelectedItem=choices.FirstOrDefault(c=>c.Id==savedId)??choices[0];
-                manualLevelValues[key]=((DuctChoice)box.SelectedItem).Id;
-                levelMapping[key]=box;
-            }
-            bool autoLevels=false;
-            Action applyLevels=()=> {
-                bool auto=mode.SelectedIndex==1;commonLevel.IsEnabled=auto;
-                if(auto && !autoLevels)foreach(var pair in levelMapping)manualLevelValues[pair.Key]=(pair.Value.SelectedItem as DuctChoice)?.Id??0;
-                foreach(var pair in levelMapping) {
-                    var choices=new[]{new DuctChoice{Id=0,Name="Automatic by elevation"}}.Concat(levels).ToList();
-                    pair.Value.IsEnabled=!auto;
-                    if(auto) {
-                        var selected=commonLevel.SelectedItem as DuctChoice;
-                        var resolved=selected?.Id>0?selected:levels.FirstOrDefault(l=>string.Equals(l.Name,pair.Key,StringComparison.OrdinalIgnoreCase));
-                        var display=new DuctChoice{Id=resolved?.Id??0,Name=selected?.Id>0?resolved.Name:"Follow IFC — "+(resolved?.Name??"by elevation")};
-                        pair.Value.ItemsSource=new[]{display};pair.Value.SelectedItem=display;
-                    } else if(autoLevels) {
-                        pair.Value.ItemsSource=choices;pair.Value.SelectedItem=choices.FirstOrDefault(c=>c.Id==manualLevelValues[pair.Key])??choices[0];
-                    }
+            var levelBoxes=new Dictionary<string,List<ComboBox>>();
+            var levelNotes=new Dictionary<ComboBox,TextBlock>();
+            foreach(var group in groups) {
+                var groupBody=(StackPanel)editors[group.Key].Content;
+                foreach(string key in group.Select(i=>i.LevelKey??"No source level").Distinct()) {
+                    var box=UiDesign.Field(groupBody,"Level","Source level: "+key+" · Preserve the IFC centerline elevation","Follow IFC",false,false,true);box.Name="GroupLevel";box.Tag=key;
+                    ((FrameworkElement)box.Parent).Parent.SetValue(FrameworkElement.MarginProperty,new Thickness(0,12,0,0));
+                    var choices=new[]{followLevel}.Concat(levels).ToList();box.ItemsSource=choices;
+                    long savedId=saved.Levels.FirstOrDefault(m=>m.Key==key)?.Id??0;
+                    box.SelectedItem=choices.FirstOrDefault(c=>c.Id==savedId)??followLevel;
+                    if(!levelBoxes.ContainsKey(key)){levelBoxes[key]=new List<ComboBox>();levelMapping[key]=box;manualLevelValues[key]=(box.SelectedItem as DuctChoice)?.Id??0;}
+                    levelBoxes[key].Add(box);
+                    var levelNote=IFCInfoWindow.Text("",13,"#716B63");levelNote.Name="ResolvedDuctLevel";levelNote.Margin=new Thickness(0,6,0,0);((Panel)box.Parent).Children.Add(levelNote);levelNotes[box]=levelNote;
                 }
-                autoLevels=auto;
+            }
+            bool autoLevels=false;bool applyingLevels=false;
+            Func<string,DuctChoice> resolveLevel=key=> {
+                var selected=levelMapping[key].SelectedItem as DuctChoice;
+                if(selected?.Id>0)return selected;
+                var matches=levels.Where(l=>string.Equals(l.Name,key,StringComparison.OrdinalIgnoreCase)).ToList();
+                return matches.Count==1?matches[0]:null;
             };
-            mode.SelectionChanged+=(s,e)=>applyLevels();commonLevel.SelectionChanged+=(s,e)=>applyLevels();applyLevels();            var worksetMapping = new Dictionary<string, ComboBox>();
+            Action applyLevels=()=> {
+                if(applyingLevels)return;applyingLevels=true;try {
+                    bool auto=mode.SelectedIndex==1;commonLevel.IsEnabled=auto;
+                    if(auto && !autoLevels)foreach(var pair in levelMapping)manualLevelValues[pair.Key]=(pair.Value.SelectedItem as DuctChoice)?.Id??0;
+                    foreach(var pair in levelBoxes) {
+                        string key=pair.Key;
+                        var selected=auto?commonLevel.SelectedItem as DuctChoice:null;
+                        var named=levels.Where(l=>string.Equals(l.Name,key,StringComparison.OrdinalIgnoreCase)).ToList();
+                        var resolved=selected?.Id>0?selected:named.Count==1?named[0]:null;
+                        foreach(var box in pair.Value) {
+                            box.IsEnabled=!auto;box.Visibility=Visibility.Visible;
+                            if(auto) {
+                                var display=new DuctChoice{Id=resolved?.Id??0,Name=selected?.Id>0?"Project level — "+resolved.Name:"Follow IFC — "+(resolved?.Name??"by elevation")};
+                                box.ItemsSource=new[]{display};box.SelectedItem=display;
+                            } else if(autoLevels) {box.ItemsSource=new[]{followLevel}.Concat(levels).ToList();box.SelectedItem=box.Items.Cast<DuctChoice>().FirstOrDefault(c=>c.Id==manualLevelValues[key])??followLevel;}
+                            var choice=box.SelectedItem as DuctChoice;
+                            levelNotes[box].Text=(auto?selected?.Id>0:choice?.Id>0)?"Project level → "+(auto?resolved?.Name:choice?.Name):"Follow IFC → "+(resolved?.Name??"by elevation");
+                        }
+                    }
+                    autoLevels=auto;
+                }finally{applyingLevels=false;}
+            };
+            foreach(var pair in levelBoxes)foreach(var box in pair.Value)box.SelectionChanged+=(s,e)=> {
+                if(applyingLevels || mode.SelectedIndex==1)return;
+                applyingLevels=true;try {long id=(box.SelectedItem as DuctChoice)?.Id??0;foreach(var sibling in levelBoxes[(string)box.Tag])if(sibling!=box)sibling.SelectedItem=sibling.Items.Cast<DuctChoice>().FirstOrDefault(c=>c.Id==id);}
+                finally{applyingLevels=false;}applyLevels();
+            };
+            mode.SelectionChanged+=(s,e)=>applyLevels();commonLevel.SelectionChanged+=(s,e)=>applyLevels();applyLevels();
+                        var worksetMapping = new Dictionary<string, ComboBox>();
             if (worksets.Count > 0)
             foreach (var key in editors.Keys)
             {
@@ -387,8 +421,25 @@ namespace IFCInfo
                 if(BrowseSystems!=null) BrowseSystems(Window.GetWindow(root) ?? this);
                 else feedback.Text="System browser is available when connected to the Revit project.";
             };
+            PrepareReview=()=> {
+                var panel=new DockPanel{Margin=new Thickness(8)};
+                var controls=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Right};DockPanel.SetDock(controls,Dock.Bottom);panel.Children.Add(controls);
+                var edit=IFCInfoWindow.Button("Back to settings",false);edit.Click+=(s,e)=>RequestSettings?.Invoke();controls.Children.Add(edit);
+                if(create.Parent is Panel previous)previous.Children.Remove(create);controls.Children.Add(create);
+                var selected=items.Where(i=>i.Include).ToList();
+                if(feedback.Parent is Panel oldFeedback)oldFeedback.Children.Remove(feedback);DockPanel.SetDock(feedback,Dock.Top);panel.Children.Add(feedback);
+                var note=IFCInfoWindow.Text(selected.Count+" selected · "+policy.SelectedItem+" · Fittings: "+(fittings.IsChecked==true?"connect":"off")+" · Gap: "+gap.Text+" mm · "+(MappingSummary?.Invoke()??"")+" Confirm settings before creating.",14,"#716B63");DockPanel.SetDock(note,Dock.Top);panel.Children.Add(note);
+                var table=new DataGrid{Name="DuctFinalReview",AutoGenerateColumns=false,IsReadOnly=true,CanUserAddRows=false,CanUserDeleteRows=false};
+                table.ItemsSource=selected.Select(i=>new{Source=i.Source.ElementId,Element=i.Source.Name,Shape=i.ShapeName,Type=editors[i.GroupKey].NewType?.Name??(editors[i.GroupKey].TypeBox.SelectedItem as DuctChoice)?.Name??"Unresolved",System=editors[i.GroupKey].NewSystem?.Name??(editors[i.GroupKey].SystemBox.SelectedItem as DuctChoice)?.Name??"Unresolved",Level=(levelMapping[i.LevelKey??"No source level"].SelectedItem as DuctChoice)?.Name??"Unresolved"}).ToList();
+                foreach(string property in new[]{"Source","Element","Shape","Type","System","Level"})table.Columns.Add(new DataGridTextColumn{Header=property,Binding=new System.Windows.Data.Binding(property),Width=new DataGridLength(1,DataGridLengthUnitType.Star)});
+                UiDesign.StyleTable(table);panel.Children.Add(table);ReviewActive=true;
+                create.IsEnabled=selected.Count>0 && double.TryParse(gap.Text,out double reviewGap) && !double.IsNaN(reviewGap) && !double.IsInfinity(reviewGap) && reviewGap>=1 && reviewGap<=1000 && selected.Select(i=>i.GroupKey).Distinct().All(k=>editors[k].Validate()==null);
+                feedback.Text=create.IsEnabled?"":"Resolve target mappings and fitting gap in preview settings before creating.";
+                return panel;
+            };
             create.Click += (s, e) =>
             {
+                if(RequestReview!=null && !ReviewActive){feedback.Text="Open Review & Create first.";return;}
                 preview.CommitEdit(DataGridEditingUnit.Cell, true); preview.CommitEdit(DataGridEditingUnit.Row, true);
                 double gapMm;
                 if (!double.TryParse(gap.Text,out gapMm) || double.IsNaN(gapMm) || double.IsInfinity(gapMm) || gapMm<1 || gapMm>1000)
@@ -417,7 +468,7 @@ namespace IFCInfo
                     SystemTypes = editors.Where(p => systemKeys.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value.NewSystem != null ? 0 : ((DuctChoice)p.Value.SystemBox.SelectedItem).Id),
                     NewSystems = newSystems,
                     NewDuctTypes=editors.Where(p=>systemKeys.Contains(p.Key) && p.Value.NewType!=null).ToDictionary(p=>p.Key,p=>p.Value.NewType),
-                    Levels = levelMapping.Where(p => levelKeys.Contains(p.Key)).ToDictionary(p => p.Key, p => ((DuctChoice)p.Value.SelectedItem).Id),
+                    Levels = levelMapping.Where(p => levelKeys.Contains(p.Key)).ToDictionary(p => p.Key, p => resolveLevel(p.Key)?.Id??0),
                     Worksets = worksetMapping.Where(p => systemKeys.Contains(p.Key)).ToDictionary(p => p.Key, p => ((DuctChoice)p.Value.SelectedItem).Id),
                     KeepSuccessful = policy.SelectedIndex == 1, SaveSettings = remember.IsChecked == true,
                     CreateFittings = fittings.IsChecked == true, ConnectTerminals = terminals.IsChecked == true,

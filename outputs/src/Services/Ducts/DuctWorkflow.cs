@@ -14,6 +14,7 @@ namespace IFCInfo
     {
         public static void Configure(IFCInfoWindow window, Document doc, RevitLinkInstance link)
         {
+            Func<BuiltInCategory> parameterCategory=()=> (BuiltInCategory)(window.SelectedCategory?.Id??(long)BuiltInCategory.OST_DuctCurves);
             window.ProjectParameters=()=> {
                 var result=new List<ParameterOption>();var it=doc.ParameterBindings.ForwardIterator();
                 while(it.MoveNext()) {
@@ -27,13 +28,15 @@ namespace IFCInfo
             window.ParameterTypes=()=>SpecUtils.GetAllSpecs().Concat(new[]{SpecTypeId.String.Text,SpecTypeId.Int.Integer,SpecTypeId.Number,SpecTypeId.Boolean.YesNo,SpecTypeId.Length}).Distinct().Select(id=>new ParameterOption {Id=id.TypeId,Name=LabelUtils.GetLabelForSpec(id),DataKind=DuctParameterMapping.Kind(id),Discipline=UnitUtils.IsMeasurableSpec(id)?LabelUtils.GetLabelForDiscipline(UnitUtils.GetDiscipline(id)):"Common"}).OrderBy(x=>x.Name).ToList();
             window.ParameterGroups=()=>ParameterUtils.GetAllBuiltInGroups().Select(id=>new ParameterOption{Id=id.TypeId,Name=LabelUtils.GetLabelForGroup(id)}).OrderBy(x=>x.Name).ToList();
             window.CreateParameter=(name,type,group,binding)=> {
+                if(window.SelectedCategory==null || !window.CanMapLineParameters)throw new InvalidOperationException("Select Ducts, Pipes, Cable Trays or Conduits before creating parameters.");
                 if(string.IsNullOrWhiteSpace(name) || name.IndexOfAny(new[]{(char)92,'/',':','{','}','[',']','|',';','<','>','?'})>=0)throw new InvalidOperationException("Enter a valid parameter name.");
-                if(DuctParameterMapping.Check(doc,name)!="Missing")throw new InvalidOperationException("This parameter name already exists or is not available.");
-                DuctCreation.RunTransaction(doc,"IFC - Create Text parameter",()=>DuctParameterMapping.Ensure(doc,new List<IfcParameterMapping>{new IfcParameterMapping{Target=name,CreateMissing=true,ParameterType=type,ParameterGroup=group,ParameterBinding=binding}}));
+                string state=DuctParameterMapping.Check(doc,name,parameterCategory());
+                if(state!="Missing" && state!="Parameter is not bound to selected category")throw new InvalidOperationException("This parameter name already exists or is not available: "+state);
+                DuctCreation.RunTransaction(doc,"IFC - Create parameter",()=>DuctParameterMapping.Ensure(doc,new List<IfcParameterMapping>{new IfcParameterMapping{Target=name,CreateMissing=true,ParameterType=type,ParameterGroup=group,ParameterBinding=binding}},parameterCategory()));
             };
-            window.CheckParameterTarget=name=>DuctParameterMapping.Check(doc,name);
+            window.CheckParameterTarget=name=>DuctParameterMapping.Check(doc,name,parameterCategory());
             window.LoadParameterTargets=()=>DuctParameterMapping.Targets(doc);
-            window.TransferParameters=(rows,maps)=>DuctParameterMapping.Transfer(doc,link,rows,maps);
+            window.TransferParameters=(rows,maps)=>window.CanCreateDucts?DuctParameterMapping.Transfer(doc,link,rows,maps):LineParameterTransfer.Transfer(doc,link,rows,maps);
             window.PreviewParameters=(rows,maps)=>DuctParameterMapping.Preview(doc,link,rows,maps);
             var loadCategory = window.LoadCategory;
             window.LoadCategory = category =>

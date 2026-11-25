@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -212,10 +212,29 @@ namespace IFCInfo
                 if (!propertySets.ContainsKey(productId)) propertySets[productId]=new List<Tuple<int,string>>();
                 foreach (int setId in Refs(Get(Ref(rel.At(5))).At(5))) propertySets[productId].Add(Tuple.Create(setId,"Type"));
             }
+            var typeNames=new Dictionary<int,string>();
+            var entityTypes=new Dictionary<int,string>();
+            foreach(var rel in entities.Values.Where(e=>e.Kind=="IFCRELDEFINESBYTYPE"))
+            foreach(int member in Refs(rel.At(4))) {var t=Get(Ref(rel.At(5)));typeNames[member]=Label(t.At(2));entityTypes[member]=t.Kind;}
+            var storeys=new Dictionary<int,HashSet<int>>();
+            var parents=new Dictionary<int,int>();
+            foreach(var rel in entities.Values.Where(e=>e.Kind=="IFCRELAGGREGATES"))foreach(int child in Refs(rel.At(5)))parents[child]=Ref(rel.At(4));
+            foreach(var rel in entities.Values.Where(e=>e.Kind=="IFCRELCONTAINEDINSPATIALSTRUCTURE"))
+            foreach(int member in Refs(rel.At(4))) {if(!storeys.ContainsKey(member))storeys[member]=new HashSet<int>();storeys[member].Add(Ref(rel.At(5)));}
             foreach (int id in productIds)
             {
                 Entity product = Get(id);
-                var result = new IfcTerminalSource { Guid = Label(product.At(0)), Name = Label(product.At(2)) };
+                var result = new IfcTerminalSource { Guid = Label(product.At(0)), Name = Label(product.At(2)),TypeName=typeNames.TryGetValue(id,out var tn)?tn:null,EntityType=entityTypes.TryGetValue(id,out var et)?et:product.Kind };
+                var foundStoreys=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                int memberId=id;var visitedMembers=new HashSet<int>();
+                while(visitedMembers.Add(memberId)) {
+                    if(storeys.TryGetValue(memberId,out var containers))foreach(int container in containers) {
+                        int current=container;var visited=new HashSet<int>();
+                        while(current!=0 && visited.Add(current)) {var node=Get(current);if(node.Kind=="IFCBUILDINGSTOREY"){foundStoreys.Add(Label(node.At(2)));break;}if(!parents.TryGetValue(current,out current))break;}
+                    }
+                    if(!parents.TryGetValue(memberId,out memberId))break;
+                }
+                result.LevelName=foundStoreys.Count==1?foundStoreys.First():null;
                 if (string.IsNullOrEmpty(result.Guid) || !product.At(0).StartsWith("'",StringComparison.Ordinal)) continue;
                 if (propertySets.TryGetValue(id,out var sets))
                     foreach (var set in sets.Distinct()) ReadPropertySet(set.Item1,set.Item2,result.Properties);
@@ -374,10 +393,22 @@ namespace IFCInfo
             result.LengthMm = Number(solid.At(3)) * sz * mm.Value;
             if (result.LengthMm <= 0 || (result.DiameterMm <= 0 && (result.WidthMm <= 0 || result.HeightMm <= 0)))
                 throw new FormatException("Invalid IFC dimensions.");
-            ResolveDimensionRoles(result);
+            double? trayHeight=null;
+            if(result.ProfileShape=="Rectangular" && (result.EntityType=="IFCCABLECARRIERSEGMENTTYPE" || result.EntityType=="IFCCABLECARRIERSEGMENT")) {
+                var world=Placement(Ref(product.At(5)),new HashSet<int>());
+                var axes=new[]{TransformDirection(world,z),TransformDirection(world,x),TransformDirection(world,y)};
+                var sizes=new[]{result.LengthMm,result.WidthMm,result.HeightMm};
+                var vertical=Enumerable.Range(0,3).Where(i=>Math.Abs(Normalize(axes[i])[2])>1-1e-8).ToList();
+                var declaredLengths=result.Properties.Where(p=>p.Scope=="Instance" && p.LengthMm.HasValue && string.Equals(p.Name,"Length",StringComparison.OrdinalIgnoreCase)).Select(p=>p.LengthMm.Value).Distinct().ToList();
+                if(vertical.Count==1 && declaredLengths.Count==1) {
+                    var longitudinal=Enumerable.Range(0,3).Where(i=>Math.Abs(sizes[i]-declaredLengths[0])<=0.6).ToList();
+                    if(longitudinal.Count==1 && longitudinal[0]!=vertical[0])trayHeight=sizes[vertical[0]];
+                }
+            }
+            ResolveDimensionRoles(result,trayHeight);
         }
         // An extrusion's depth is a modelling axis, not necessarily the duct's longitudinal axis.
-        private static void ResolveDimensionRoles(IfcTerminalSource result)
+        private static void ResolveDimensionRoles(IfcTerminalSource result,double? trayHeight=null)
         {
             Func<string,double?> declared = name =>
             {
@@ -395,7 +426,7 @@ namespace IFCInfo
                 if(candidates.Any(p=>Math.Abs(p.LengthMm.Value-value)>0.6))throw new NotSupportedException("Conflicting IFC "+name+" values; cannot determine duct axes safely.");
                 return value;
             };
-            double? length=declared("Length"), width=declared("Width"), height=declared("Height");
+            double? length=declared("Length"), width=declared("Width"), height=declared("Height")??trayHeight;
             Func<double,double?,bool> fits=(actual,wanted)=>!wanted.HasValue || Math.Abs(actual-wanted.Value)<=0.6;
             if(result.ProfileShape!="Rectangular")
             {

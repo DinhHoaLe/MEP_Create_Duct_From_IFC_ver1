@@ -112,7 +112,7 @@ namespace IFCInfo
             });
             var groups=Groups?.Invoke()??new List<ParameterOption>();if(groups.Count==0)groups.Add(new ParameterOption{Id="Data",Name="Data"});
             var groupBox=UiDesign.Field(top,"Group parameter under","","Select group",false,true);groupBox.ItemsSource=groups;groupBox.SelectedItem=groups.FirstOrDefault(g=>g.Id=="Data" || g.Id.Contains(":data-"))??groups[0];
-            var binding=UiDesign.Field(top,"Parameter binding","Type values affect every duct using the same type.","Select binding",false,true);binding.ItemsSource=new[]{"Instance","Type"};binding.SelectedIndex=0;
+            var binding=UiDesign.Field(top,"Parameter binding","Type values affect every element using the same type.","Select binding",false,true);binding.ItemsSource=new[]{"Instance","Type"};binding.SelectedIndex=0;
             var footer=new StackPanel();DockPanel.SetDock(footer,Dock.Bottom);root.Children.Add(footer);
             var report=new TextBlock{TextWrapping=TextWrapping.Wrap,Margin=new Thickness(4)};footer.Children.Add(report);
             var buttons=new WrapPanel();footer.Children.Add(buttons);
@@ -146,7 +146,7 @@ namespace IFCInfo
                             var target=(Catalog?.Invoke()??new List<ParameterOption>()).FirstOrDefault(p=>p.Name==name);
                             if(target==null || target.Id!=row.TypeId || target.Binding!=(string)binding.SelectedItem)throw new InvalidOperationException("Existing parameter has a different data type or binding.");
                         }
-                        else if(state!="Missing")throw new InvalidOperationException(state);
+                        else if(state!="Missing" && state!="Parameter is not bound to selected category")throw new InvalidOperationException(state);
                         else if(CreateParameter==null)throw new InvalidOperationException("No Revit project is connected.");
                         else CreateParameter(name,row.TypeId,((ParameterOption)groupBox.SelectedItem).Id,(string)binding.SelectedItem);
                         Refresh();
@@ -157,6 +157,7 @@ namespace IFCInfo
                             mapping.Target=name;
                             if(mapping.Target!=name)throw new InvalidOperationException("Parameter exists, but mapping was rejected. Check source type and target compatibility.");
                         }
+                        RemoveBlankRows();
                         row.State=(reused?"Reused":"Created")+(string.IsNullOrWhiteSpace(row.Source)?"":" and mapped");row.Completed=true;row.Include=false;success++;
                         if(!string.IsNullOrWhiteSpace(row.Source))
                         {
@@ -165,7 +166,7 @@ namespace IFCInfo
                     }
                     catch(Exception ex){row.State="Error: "+ex.Message;failed++;}
                 }
-                report.Text=success+" succeeded; "+failed+" failed. Successful parameters remain in the project. Values are written when ducts are created.";
+                report.Text=success+" succeeded; "+failed+" failed. Successful parameters remain in the project. Values are written when elements are created.";
             });
             AddButton(buttons,"Close",()=>dialog.Close());
             UiDesign.SetContent(dialog,root);return dialog;
